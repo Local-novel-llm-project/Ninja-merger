@@ -1,0 +1,11 @@
+llava==0.0.1.dev0
+peft==0.10.0
+PyYAML==6.0.1
+PyYAML==6.0.1
+torch==2.2.1
+tqdm==4.66.4
+transformers==4.40.1
+torch==2.1.0
+protobuf
+sentencepiece
+accelerate
