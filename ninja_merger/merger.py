@@ -6,8 +6,8 @@
 import torch
 from tqdm import tqdm
 
-import calc_method
-from layer_utility import is_layer_dropped, is_layer_included, parse_layer_specifications
+from . import calc_method
+from .layer_utility import is_layer_dropped, is_layer_included, parse_layer_specifications
 
 
 def merge(
