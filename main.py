@@ -12,44 +12,28 @@ import sys
 import torch
 from tqdm import tqdm
 
-from src.layer_utility import dump_layers, get_skip_layers, parse_layers
-from src.merger import merge
-from src.utility import define_savename, load_config
-from src.model_loader import load_model, load_vlm_model, load_llava_model, load_left_right_models, load_processor, load_tokenizer
-
-# コマンドライン引数の設定
-parser = argparse.ArgumentParser(description='Merge models')
-parser.add_argument('-c', '--config', type=str, default='model_config.yaml', help='Path to the JSON configuration file')
-parser.add_argument('-o', '--out_dir', type=str, default='./merged_models', help='Directory to save the merged model')
-parser.add_argument('-n', '--skip_layernorm', action='store_true', help='Skip layernorm during merging')
-parser.add_argument('-dm', '--merge_models_device', type=str, default='cpu', help='Device for merging models')
-parser.add_argument('-dt', '--target_model_device', type=str, default='cpu', help='Device for the target model')
-parser.add_argument('-t', '--torch_dtype', type=str, default='bfloat16', help='Torch data type')
-parser.add_argument('-r', '--recurrent_mode', type=bool, default=True , help='use target recurrent mode')
-parser.add_argument('-d', '--dry_run', action='store_true', help='Dump processed layer infos without merging')
-parser.add_argument('-l', '--save_only_last_model', action='store_true', help='Only last model saved')
-parser.add_argument('--dump_layers', action='store_true', help='Dump model layers to a file instead of merging')
-parser.add_argument('--include_layers', type=str, default=None, help='Comma-separated list of layers to include')
-parser.add_argument('--exclude_layers', type=str, default=None, help='Comma-separated list of layers to exclude')
+from ninja_merger.layer_utility import dump_layers, get_skip_layers, parse_layers
+from ninja_merger.merger import merge
+from ninja_merger.utility import define_savename, load_config
+from ninja_merger.model_loader import load_model, load_vlm_model, load_llava_model, load_left_right_models, load_processor, load_tokenizer
 
 
-args = parser.parse_args()
+def main(args):
+    # layernormをスキップするか
+    skip_layernorm = args.skip_layernorm
 
-# layernormをスキップするか
-skip_layernorm = args.skip_layernorm
+    # デバイスの設定
+    merge_models_device = args.merge_models_device
+    target_model_device = args.target_model_device
 
-# デバイスの設定
-merge_models_device = args.merge_models_device
-target_model_device = args.target_model_device
+    # 精度の設定
+    torch_dtype = getattr(torch, args.torch_dtype)
 
-# 精度の設定
-torch_dtype = getattr(torch, args.torch_dtype)
-
-
-include_layers = parse_layers(args.include_layers)
-exclude_layers = parse_layers(args.exclude_layers)
-
-def main():
+    # 含める、含めないレイヤー
+    include_layers = parse_layers(args.include_layers)
+    exclude_layers = parse_layers(args.exclude_layers)
+    
+    
     models_list, (name_target_model, name_target_model_type, lora_name) = load_config(args.config)
     target_model, target_state_dict = None, None
     is_llava_next = False
@@ -166,4 +150,22 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    # コマンドライン引数の設定
+    parser = argparse.ArgumentParser(description='Merge models')
+    parser.add_argument('-c', '--config', type=str, default='model_config.yaml', help='Path to the JSON configuration file')
+    parser.add_argument('-o', '--out_dir', type=str, default='./merged_models', help='Directory to save the merged model')
+    parser.add_argument('-n', '--skip_layernorm', action='store_true', help='Skip layernorm during merging')
+    parser.add_argument('-dm', '--merge_models_device', type=str, default='cpu', help='Device for merging models')
+    parser.add_argument('-dt', '--target_model_device', type=str, default='cpu', help='Device for the target model')
+    parser.add_argument('-t', '--torch_dtype', type=str, default='bfloat16', help='Torch data type')
+    parser.add_argument('-r', '--recurrent_mode', type=bool, default=True , help='use target recurrent mode')
+    parser.add_argument('-d', '--dry_run', action='store_true', help='Dump processed layer infos without merging')
+    parser.add_argument('-l', '--save_only_last_model', action='store_true', help='Only last model saved')
+    parser.add_argument('--dump_layers', action='store_true', help='Dump model layers to a file instead of merging')
+    parser.add_argument('--include_layers', type=str, default=None, help='Comma-separated list of layers to include')
+    parser.add_argument('--exclude_layers', type=str, default=None, help='Comma-separated list of layers to exclude')
+
+
+    args = parser.parse_args()
+    
+    main(args)
