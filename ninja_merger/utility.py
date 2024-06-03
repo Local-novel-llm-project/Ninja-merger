@@ -14,9 +14,11 @@ def get_savename(path):
     path_parts = path_path.parts
     if path_parts[0] == "/" or ":" in path_parts[0]:
         path_parts = path_parts[1:]
+        
     return "-".join(path_parts)
 
-def define_savename(base, sub, name_target_model,out_dir):
+
+def define_savename(base, sub, name_target_model, out_dir):
     base = get_savename(base)
     sub = get_savename(sub)
     model_name =  f"{sub}_{base}"
@@ -32,6 +34,7 @@ def define_savename(base, sub, name_target_model,out_dir):
 
     return save_name
 
+
 def load_config(config_path):
     # YAMLファイルを優先する
     yaml_path = config_path.replace('.json', '.yaml')
@@ -44,4 +47,5 @@ def load_config(config_path):
             config = json.load(f)
     models_list = config["models"]
     name_target_model, name_target_model_type, name_lora_model = config["target_model"], config.get("target_model_type", "llm"), config.get("lora_model", None)
+    
     return models_list, (name_target_model, name_target_model_type, name_lora_model)

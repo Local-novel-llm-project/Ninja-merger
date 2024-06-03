@@ -39,14 +39,14 @@ def main(args):
     is_llava_next = False
     if name_target_model is not None:
         if name_target_model_type == "vlm":
-            target_model, target_state_dict = load_vlm_model(name_target_model, lora_name, target_model_device,torch_dtype)
+            target_model, target_state_dict = load_vlm_model(name_target_model, lora_name, target_model_device, torch_dtype)
         elif name_target_model_type == "llava-next":
             is_llava_next = True
-            target_model, target_state_dict = load_vlm_model(name_target_model, lora_name, target_model_device,torch_dtype)
+            target_model, target_state_dict = load_vlm_model(name_target_model, lora_name, target_model_device, torch_dtype)
         elif name_target_model_type == "llava":
-            target_model, target_state_dict, tokenizer, _ = load_llava_model(name_target_model, lora_name, target_model_device,torch_dtype)
+            target_model, target_state_dict, tokenizer, _ = load_llava_model(name_target_model, lora_name, target_model_device, torch_dtype)
         else:
-            target_model, target_state_dict = load_model(name_target_model, lora_name, target_model_device,torch_dtype)
+            target_model, target_state_dict = load_model(name_target_model, lora_name, target_model_device, torch_dtype)
 
     if models_list is None and lora_name is not None:
         print(f"saving tokenizer from {name_target_model}...")
@@ -56,18 +56,18 @@ def main(args):
             tokenizer = load_processor(name_target_model)
         else:
             tokenizer = load_tokenizer(name_target_model)
-        tokenizer.save_pretrained(define_savename(name_target_model, lora_name, "lora"))
+        tokenizer.save_pretrained(define_savename(name_target_model, lora_name, "lora", args.out_dir))
         print("tokenizer save done")
         print("saving model...")
-        target_model.save_pretrained(define_savename(name_target_model, lora_name, "lora"))
+        target_model.save_pretrained(define_savename(name_target_model, lora_name, "lora", args.out_dir))
         print("model save done")
         sys.exit(0)
 
 
     for i, model_dict in enumerate(models_list):
-        savename = define_savename(model_dict["left"], model_dict["right"], name_target_model)
+        savename = define_savename(model_dict["left"], model_dict["right"], name_target_model, args.out_dir)
 
-        (base_model, base_state_dict), (sub_model, sub_state_dict), velocity = load_left_right_models(model_dict,merge_models_device)
+        (base_model, base_state_dict), (sub_model, sub_state_dict), velocity = load_left_right_models(model_dict, merge_models_device, torch_dtype)
         if i > 0 and target_model is not None:
             if model_dict["left"] == "recurrent":
                 base_state_dict = target_model.state_dict()
