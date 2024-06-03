@@ -5,8 +5,13 @@ import calc_method
 from layer_utility import is_layer_dropped, is_layer_included, parse_layer_specifications
 
 
-def merge(skip_layernorm,target_state_dict, base_state_dict, sub_state_dict, velocity, post_velocity, skip_layers, operation, post_operation, normalization, include_layers, exclude_layers, drop_layers, unmatch_size_layer_op, dry_run=False, is_llava_next=False):
-    # target = target_state_dict if target_state_dict is not None else base_state_dict
+def merge(
+    skip_layernorm, target_state_dict, base_state_dict, sub_state_dict,
+    velocity, post_velocity, skip_layers,
+    operation, post_operation, normalization,
+    include_layers, exclude_layers, drop_layers,
+    unmatch_size_layer_op, dry_run=False, is_llava_next=False):
+    
     if target_state_dict is None:
         target = base_state_dict
         post_operation = "mix"
@@ -92,14 +97,13 @@ def merge(skip_layernorm,target_state_dict, base_state_dict, sub_state_dict, vel
                             return t[:indice[0], :indice[1], :indice[2]]
                         # TODO: support N dimentional
                         return t
-                    if len(min_size) == 1:
-                        min_size = min(v.shape, base_state_dict[k].shape, sub_state_dict[k].shape)
-                        get_slice_to(v, min_size).copy_(normalization_dict[normalization](
-                            post_operation_dict[post_operation],
-                            get_slice_to(v, min_size),
-                            operation_dict[operation](get_slice_to(v, min_size), get_slice_to(base_state_dict[k], min_size), get_slice_to(sub_state_dict[k], min_size), velocity),
-                            post_velocity
-                        ))
+                    min_size = min(v.shape, base_state_dict[k].shape, sub_state_dict[k].shape)
+                    get_slice_to(v, min_size).copy_(normalization_dict[normalization](
+                        post_operation_dict[post_operation],
+                        get_slice_to(v, min_size),
+                        operation_dict[operation](get_slice_to(v, min_size), get_slice_to(base_state_dict[k], min_size), get_slice_to(sub_state_dict[k], min_size), velocity),
+                        post_velocity
+                    ))
 
     with tqdm(dropped_layers) as pbar:
         for k in pbar:
