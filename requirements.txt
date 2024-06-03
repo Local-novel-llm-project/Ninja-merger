@@ -1,6 +1,6 @@
 torch>=2.2.1
 transformers>=4.40.1
-llava==0.0.1.dev0
+# llava==0.0.1.dev0   # if you use LLaVA, please install: https://github.com/haotian-liu/LLaVA
 peft
 PyYAML
 protobuf
