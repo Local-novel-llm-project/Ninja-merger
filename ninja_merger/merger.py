@@ -94,7 +94,6 @@ def merge(
                     min_size = min(v.shape, base_state_dict[k].shape, sub_state_dict[k].shape)
                     def get_slice_to(t, indice):
                         if len(indice) == 1:
-                            print(indice)
                             return t[:indice[0]]
                         elif len(indice) == 2:
                             return t[:indice[0], :indice[1]]
