@@ -1,3 +1,8 @@
+# Copyright (c) 2024 TylorShine
+#                    UmiseTokikaze
+#                    Exveria
+# license: Apache-2.0
+
 import json
 import os
 from pathlib import Path
