@@ -12,7 +12,6 @@ def get_savename(path):
     return "-".join(path_parts)
 
 def define_savename(base, sub, name_target_model,out_dir):
-
     base = get_savename(base)
     sub = get_savename(sub)
     model_name =  f"{sub}_{base}"

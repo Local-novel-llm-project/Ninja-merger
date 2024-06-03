@@ -34,12 +34,6 @@ def is_layer_included(layer_name, include_ranges, include_specific, exclude_rang
         excluded = any(index in r for r in exclude_ranges) if len(exclude_ranges) > 0 else False
         return included and not excluded
 
-
-    # # デフォルトで含める層
-    # default_include_layers = ['model.embed_tokens.weight', 'model.norm.weight', 'lm_head.weight']
-    # if layer_name in default_include_layers:
-    #     return True
-
     return len(include_specific) <= 0  # レイヤー名が特定の形式に合致しない場合は含める
 
 def is_layer_dropped(layer_name, drop_ranges, drop_specific):
@@ -69,8 +63,6 @@ def get_skip_layers(target_state_dict, base_state_dict, sub_state_dict, unmatch_
     if target_state_dict is None:
         target = base_state_dict
     for target_key in target.keys():
-        # if base_state_dict[target_key].size() != target_state_dict[target_key].size() \
-        #     or sub_state_dict[target_key].size() != target_state_dict[target_key].size():
         orig_target_key = target_key
         if is_llava_next:
             target_key = target_key.replace("language_model.", "", 1)

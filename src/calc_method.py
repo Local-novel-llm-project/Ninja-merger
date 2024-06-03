@@ -87,7 +87,6 @@ def MatchStdMean(proc_func, v1, v2, velocity, **kwargs):
     orig_std, orig_mean = torch.std_mean(v1)
     processed = proc_func(v1, v2, velocity)
     std, mean = torch.std_mean(processed)
-    # return (processed - (mean - orig_mean)) * ((orig_std + eps)/(std + eps))
     return (processed - (mean - orig_mean)) * (max(std, eps)/max(orig_std, eps))
 
 def ProcStdMean(proc_func, v1, v2, velocity, **kwargs):
