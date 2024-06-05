@@ -21,10 +21,10 @@ def Div(v, base_state_dict, sub_state_dict, velocity):
 def Mix(v, base_state_dict, sub_state_dict, velocity):
     return (base_state_dict*(1.0 - velocity) + sub_state_dict*velocity).to(v)
 
-def Avg(v, base_state_dict, sub_state_dict, base_weight, sub_weight,velocity):
+def Avg(v, base_state_dict, sub_state_dict, base_weight, sub_weight, velocity):
     return (base_state_dict * base_weight + sub_state_dict * sub_weight) / (base_weight + sub_weight)
 
-def Concatenation(v, base_state_dict, sub_state_dict,velocity):
+def Concatenation(v, base_state_dict, sub_state_dict, velocity):
     return torch.cat((base_state_dict, sub_state_dict), dim=0)
 
 def MaxPool(v, base_state_dict, sub_state_dict,velocity):
@@ -44,37 +44,37 @@ def StdSub(v, base_state_dict, sub_state_dict, velocity):
 
 
 def PostAdd(v, processed_value, velocity):
-    return v + processed_value
+    return v + processed_value*velocity
 
 def PostSub(v, processed_value, velocity):
-    return v - processed_value
+    return v - processed_value*velocity
 
 def PostSubFrom(v, processed_value, velocity):
-    return processed_value - v
+    return processed_value - v*velocity
 
 def PostMul(v, processed_value, velocity):
-    return v * processed_value
+    return v * processed_value*velocity
 
 def PostDiv(v, processed_value, velocity):
-    return v / processed_value
+    return v / processed_value*velocity
 
 def PostDivBy(v, processed_value, velocity):
-    return processed_value / v
+    return processed_value*velocity / v
 
 def PostMix(v, processed_value, velocity):
     return (v*(1.0 - velocity) + processed_value*velocity).to(v)
 
 def PostConcatenation(v, processed_value, velocity):
-    return torch.cat((v, processed_value), dim=0)
+    return torch.cat((v, processed_value*velocity), dim=0)
 
 def PostMaxPool(v, processed_value, velocity):
-    return torch.max(v, processed_value)
+    return torch.max(v, processed_value*velocity)
 
 def PostMinPool(v, processed_value, velocity):
-    return torch.min(v, processed_value)
+    return torch.min(v, processed_value*velocity)
 
 def PostGeometricMean(v, processed_value, velocity):
-    return torch.sqrt(v * processed_value)
+    return torch.sqrt(v * processed_value * velocity)
 
 
 def Passthrough(proc_func, v1, v2, velocity, **kwargs):
