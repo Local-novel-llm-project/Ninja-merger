@@ -1,4 +1,6 @@
 # 🥷ninja-merger
+*English* | [日本語](README_ja.md)
+
 
 ninja-merger is a minimal tool for LLM vector merge.
 
