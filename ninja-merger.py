@@ -58,8 +58,9 @@ def main(args):
             tokenizer = load_tokenizer(name_target_model)
         tokenizer.save_pretrained(define_savename(name_target_model, lora_name, "lora", args.out_dir))
         print("tokenizer save done")
-        print("saving model...")
-        target_model.save_pretrained(define_savename(name_target_model, lora_name, "lora", args.out_dir))
+        savename = define_savename(name_target_model, lora_name, "lora", args.out_dir)
+        print(f"saving model to {savename}...")
+        target_model.save_pretrained(savename)
         print("model save done")
         sys.exit(0)
 
