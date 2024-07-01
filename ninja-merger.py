@@ -15,7 +15,14 @@ from tqdm import tqdm
 from ninja_merger.layer_utility import dump_layers, get_skip_layers, parse_layers
 from ninja_merger.merger import merge
 from ninja_merger.utility import define_savename, load_config
-from ninja_merger.model_loader import load_model, load_vlm_model, load_llava_model, load_left_right_models, load_processor, load_tokenizer
+from ninja_merger.model_loader import (
+    load_model,
+    load_vlm_model,
+    load_llava_model,
+    load_left_right_models,
+    load_processor,
+    load_tokenizer,
+)
 
 
 def main(args):
@@ -32,21 +39,30 @@ def main(args):
     # 含める、含めないレイヤー
     include_layers = parse_layers(args.include_layers)
     exclude_layers = parse_layers(args.exclude_layers)
-    
-    
-    models_list, (name_target_model, name_target_model_type, lora_name) = load_config(args.config)
+
+    models_list, (name_target_model, name_target_model_type, lora_name) = load_config(
+        args.config
+    )
     target_model, target_state_dict = None, None
     is_llava_next = False
     if name_target_model is not None:
         if name_target_model_type == "vlm":
-            target_model, target_state_dict = load_vlm_model(name_target_model, lora_name, target_model_device, torch_dtype)
+            target_model, target_state_dict = load_vlm_model(
+                name_target_model, lora_name, target_model_device, torch_dtype
+            )
         elif name_target_model_type == "llava-next":
             is_llava_next = True
-            target_model, target_state_dict = load_vlm_model(name_target_model, lora_name, target_model_device, torch_dtype)
+            target_model, target_state_dict = load_vlm_model(
+                name_target_model, lora_name, target_model_device, torch_dtype
+            )
         elif name_target_model_type == "llava":
-            target_model, target_state_dict, tokenizer, _ = load_llava_model(name_target_model, lora_name, target_model_device, torch_dtype)
+            target_model, target_state_dict, tokenizer, _ = load_llava_model(
+                name_target_model, lora_name, target_model_device, torch_dtype
+            )
         else:
-            target_model, target_state_dict = load_model(name_target_model, lora_name, target_model_device, torch_dtype)
+            target_model, target_state_dict = load_model(
+                name_target_model, lora_name, target_model_device, torch_dtype
+            )
 
     if models_list is None and lora_name is not None:
         print(f"saving tokenizer from {name_target_model}...")
@@ -56,7 +72,9 @@ def main(args):
             tokenizer = load_processor(name_target_model)
         else:
             tokenizer = load_tokenizer(name_target_model)
-        tokenizer.save_pretrained(define_savename(name_target_model, lora_name, "lora", args.out_dir))
+        tokenizer.save_pretrained(
+            define_savename(name_target_model, lora_name, "lora", args.out_dir)
+        )
         print("tokenizer save done")
         savename = define_savename(name_target_model, lora_name, "lora", args.out_dir)
         print(f"saving model to {savename}...")
@@ -64,11 +82,14 @@ def main(args):
         print("model save done")
         sys.exit(0)
 
-
     for i, model_dict in enumerate(models_list):
-        savename = define_savename(model_dict["left"], model_dict["right"], name_target_model, args.out_dir)
+        savename = define_savename(
+            model_dict["left"], model_dict["right"], name_target_model, args.out_dir
+        )
 
-        (base_model, base_state_dict), (sub_model, sub_state_dict), velocity = load_left_right_models(model_dict, merge_models_device, torch_dtype)
+        (base_model, base_state_dict), (sub_model, sub_state_dict), velocity = (
+            load_left_right_models(model_dict, merge_models_device, torch_dtype)
+        )
         if i > 0 and target_model is not None:
             if model_dict["left"] == "recurrent":
                 base_state_dict = target_model.state_dict()
@@ -98,14 +119,54 @@ def main(args):
             normalization = model_dict.get("normalization", "none")
             unmatch_size_layer_op = model_dict.get("unmatch_size_layer_op", "skip")
 
-            skip_layers = get_skip_layers(target_state_dict, base_state_dict, sub_state_dict, unmatch_size_layer_op, is_llava_next=is_llava_next)
+            skip_layers = get_skip_layers(
+                target_state_dict,
+                base_state_dict,
+                sub_state_dict,
+                unmatch_size_layer_op,
+                is_llava_next=is_llava_next,
+            )
 
             print("start merge")
             if name_target_model is not None:
-                target_state_dict = merge(skip_layernorm,target_state_dict, base_state_dict, sub_state_dict, velocity, post_velocity, skip_layers, model_dict["operation"], post_operation, normalization, include_layers, exclude_layers, drop_layers, unmatch_size_layer_op, args.dry_run, is_llava_next=is_llava_next)
+                target_state_dict = merge(
+                    skip_layernorm,
+                    target_state_dict,
+                    base_state_dict,
+                    sub_state_dict,
+                    velocity,
+                    post_velocity,
+                    skip_layers,
+                    model_dict["operation"],
+                    post_operation,
+                    normalization,
+                    include_layers,
+                    exclude_layers,
+                    drop_layers,
+                    unmatch_size_layer_op,
+                    args.dry_run,
+                    is_llava_next=is_llava_next,
+                )
                 del base_state_dict, sub_state_dict
             else:
-                base_state_dict = merge(skip_layernorm,target_state_dict, base_state_dict, sub_state_dict, velocity, post_velocity, skip_layers, model_dict["operation"], post_operation, normalization, include_layers, exclude_layers, drop_layers, unmatch_size_layer_op, args.dry_run, is_llava_next=is_llava_next)
+                base_state_dict = merge(
+                    skip_layernorm,
+                    target_state_dict,
+                    base_state_dict,
+                    sub_state_dict,
+                    velocity,
+                    post_velocity,
+                    skip_layers,
+                    model_dict["operation"],
+                    post_operation,
+                    normalization,
+                    include_layers,
+                    exclude_layers,
+                    drop_layers,
+                    unmatch_size_layer_op,
+                    args.dry_run,
+                    is_llava_next=is_llava_next,
+                )
                 del sub_state_dict
 
             if args.dry_run:
@@ -129,9 +190,9 @@ def main(args):
                     if name_target_model_type == "llava":
                         pass
                     elif name_target_model_type == "vlm":
-                        tokenizer = load_processor(model_dict['left'])
+                        tokenizer = load_processor(model_dict["left"])
                     else:
-                        tokenizer = load_tokenizer(model_dict['left'])
+                        tokenizer = load_tokenizer(model_dict["left"])
                 tokenizer.save_pretrained(savename)
                 print("tokenizer save done")
 
@@ -150,23 +211,83 @@ def main(args):
         gc.collect()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     # コマンドライン引数の設定
-    parser = argparse.ArgumentParser(description='Merge models')
-    parser.add_argument('-c', '--config', type=str, default='model_config.yaml', help='Path to the JSON configuration file')
-    parser.add_argument('-o', '--out_dir', type=str, default='./merged_models', help='Directory to save the merged model')
-    parser.add_argument('-n', '--skip_layernorm', action='store_true', help='Skip layernorm during merging')
-    parser.add_argument('-dm', '--merge_models_device', type=str, default='cpu', help='Device for merging models')
-    parser.add_argument('-dt', '--target_model_device', type=str, default='cpu', help='Device for the target model')
-    parser.add_argument('-t', '--torch_dtype', type=str, default='bfloat16', help='Torch data type')
-    parser.add_argument('-r', '--recurrent_mode', type=bool, default=True , help='use target recurrent mode')
-    parser.add_argument('-d', '--dry_run', action='store_true', help='Dump processed layer infos without merging')
-    parser.add_argument('-l', '--save_only_last_model', action='store_true', help='Only last model saved')
-    parser.add_argument('--dump_layers', action='store_true', help='Dump model layers to a file instead of merging')
-    parser.add_argument('--include_layers', type=str, default=None, help='Comma-separated list of layers to include')
-    parser.add_argument('--exclude_layers', type=str, default=None, help='Comma-separated list of layers to exclude')
-
+    parser = argparse.ArgumentParser(description="Merge models")
+    parser.add_argument(
+        "-c",
+        "--config",
+        type=str,
+        default="model_config.yaml",
+        help="Path to the JSON configuration file",
+    )
+    parser.add_argument(
+        "-o",
+        "--out_dir",
+        type=str,
+        default="./merged_models",
+        help="Directory to save the merged model",
+    )
+    parser.add_argument(
+        "-n",
+        "--skip_layernorm",
+        action="store_true",
+        help="Skip layernorm during merging",
+    )
+    parser.add_argument(
+        "-dm",
+        "--merge_models_device",
+        type=str,
+        default="cpu",
+        help="Device for merging models",
+    )
+    parser.add_argument(
+        "-dt",
+        "--target_model_device",
+        type=str,
+        default="cpu",
+        help="Device for the target model",
+    )
+    parser.add_argument(
+        "-t", "--torch_dtype", type=str, default="bfloat16", help="Torch data type"
+    )
+    parser.add_argument(
+        "-r",
+        "--recurrent_mode",
+        type=bool,
+        default=True,
+        help="use target recurrent mode",
+    )
+    parser.add_argument(
+        "-d",
+        "--dry_run",
+        action="store_true",
+        help="Dump processed layer infos without merging",
+    )
+    parser.add_argument(
+        "-l",
+        "--save_only_last_model",
+        action="store_true",
+        help="Only last model saved",
+    )
+    parser.add_argument(
+        "--dump_layers",
+        action="store_true",
+        help="Dump model layers to a file instead of merging",
+    )
+    parser.add_argument(
+        "--include_layers",
+        type=str,
+        default=None,
+        help="Comma-separated list of layers to include",
+    )
+    parser.add_argument(
+        "--exclude_layers",
+        type=str,
+        default=None,
+        help="Comma-separated list of layers to exclude",
+    )
 
     args = parser.parse_args()
-    
+
     main(args)
