@@ -43,7 +43,7 @@ def main(args):
     models_list, (name_target_model, name_target_model_type, lora_name) = load_config(
         args.config
     )
-    target_model, target_state_dict = None, None
+    target_model = None
     is_llava_next = False
     if name_target_model is not None:
         if name_target_model_type == "vlm":
@@ -60,7 +60,7 @@ def main(args):
                 name_target_model, lora_name, target_model_device, torch_dtype
             )
         else:
-            target_model, target_state_dict = load_model(
+            target_model = load_model(
                 name_target_model, lora_name, target_model_device, torch_dtype
             )
 
@@ -72,11 +72,9 @@ def main(args):
             tokenizer = load_processor(name_target_model)
         else:
             tokenizer = load_tokenizer(name_target_model)
-        tokenizer.save_pretrained(
-            define_savename(name_target_model, lora_name, "lora", args.out_dir)
-        )
+        savename = define_savename([name_target_model], lora_name, "lora", args.out_dir)
+        tokenizer.save_pretrained(savename)
         print("tokenizer save done")
-        savename = define_savename(name_target_model, lora_name, "lora", args.out_dir)
         print(f"saving model to {savename}...")
         target_model.save_pretrained(savename)
         print("model save done")
@@ -87,22 +85,23 @@ def main(args):
             model_dict["left"], model_dict["right"], name_target_model, args.out_dir
         )
 
-        (base_model, base_state_dict), (sub_model, sub_state_dict), velocity = (
+        base_models, sub_model, velocity = (
             load_left_right_models(model_dict, merge_models_device, torch_dtype)
         )
+        # print(model_dict, target_model is not None)
         if i > 0 and target_model is not None:
-            if model_dict["left"] == "recurrent":
-                base_state_dict = target_model.state_dict()
+            if model_dict["left"][0] == "recurrent":
+                base_models = [target_model]
                 print("recurrent left")
             elif model_dict["right"] == "recurrent":
-                sub_state_dict = target_model.state_dict()
+                sub_model = target_model
                 print("recurrent right")
             # elif args.recurrent_mode:
             #     target_state_dict = target_model.state_dict()
             #     print("recurrent mode")
 
         if args.dump_layers:
-            dump_layers(base_state_dict, savename)
+            dump_layers(base_models[0].state_dict(), savename)
             continue
 
         if os.path.exists(savename) and not args.dry_run:
@@ -120,20 +119,20 @@ def main(args):
             unmatch_size_layer_op = model_dict.get("unmatch_size_layer_op", "skip")
 
             skip_layers = get_skip_layers(
-                target_state_dict,
-                base_state_dict,
-                sub_state_dict,
+                target_model,
+                base_models,
+                sub_model,
                 unmatch_size_layer_op,
                 is_llava_next=is_llava_next,
             )
 
             print("start merge")
             if name_target_model is not None:
-                target_state_dict = merge(
+                merge(
                     skip_layernorm,
-                    target_state_dict,
-                    base_state_dict,
-                    sub_state_dict,
+                    target_model,
+                    base_models,
+                    sub_model,
                     velocity,
                     post_velocity,
                     skip_layers,
@@ -147,13 +146,13 @@ def main(args):
                     args.dry_run,
                     is_llava_next=is_llava_next,
                 )
-                del base_state_dict, sub_state_dict
+                # del base_state_dict, sub_state_dict
             else:
-                base_state_dict = merge(
+                merge(
                     skip_layernorm,
-                    target_state_dict,
-                    base_state_dict,
-                    sub_state_dict,
+                    target_model,
+                    base_models,
+                    sub_model,
                     velocity,
                     post_velocity,
                     skip_layers,
@@ -167,7 +166,7 @@ def main(args):
                     args.dry_run,
                     is_llava_next=is_llava_next,
                 )
-                del sub_state_dict
+                # del sub_state_dict
 
             if args.dry_run:
                 print("dry running: no save models")
@@ -198,15 +197,15 @@ def main(args):
 
                 del sub_model
                 if name_target_model is not None:
-                    del base_model
+                    del base_models
                     target_model.save_pretrained(savename)
                 else:
-                    base_model.save_pretrained(savename)
-                    del base_model
+                    base_models[0].save_pretrained(savename)
+                    del base_models
 
                 print("model save done")
             else:
-                del base_model, sub_model
+                del base_models, sub_model
 
         gc.collect()
 

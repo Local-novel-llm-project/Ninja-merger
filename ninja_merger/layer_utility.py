@@ -75,19 +75,24 @@ def parse_layers(layers_str):
 
 
 def get_skip_layers(
-    target_state_dict,
-    base_state_dict,
-    sub_state_dict,
+    target_model,
+    base_models,
+    sub_model,
     unmatch_size_layer_op,
     is_llava_next=False,
 ):
     # それぞれのstate_dictからキーとテンソルのサイズを取得し、比較する。もしも合致しないものがあればそれだけを表示する。
     skip_layers = []
-    target = target_state_dict
-    if target_state_dict is None:
-        target = base_state_dict
+    if target_model is None:
+        base_state_dicts = [b.state_dict() for b in base_models]
+        target = base_state_dicts[0]
+    else:
+        target = target_model.state_dict()
+        base_state_dicts = [b.state_dict() for b in base_models]
+    sub_state_dict = sub_model.state_dict()
+        
     for target_key in target.keys():
-        orig_target_key = target_key
+        # orig_target_key = target_key
         if is_llava_next:
             target_key = target_key.replace("language_model.", "", 1)
 
@@ -95,20 +100,20 @@ def get_skip_layers(
             print(f"[yellow] left key not found: {target_key}, skip...[/yellow]")
             skip_layers.append(target_key)
             continue
-        if base_state_dict[target_key].size() != sub_state_dict[target_key].size() or (
-            target_state_dict is not None
-            and base_state_dict[target_key].size()
-            != target_state_dict[orig_target_key].size()
-        ):
-            print("\n ------------------------------------")
-            print(f"[bold red] mismatch size: {target_key}[/bold red]")
-            print("[bold]tensor size[/bold]")
-            if target_state_dict is not None:
-                print(f"  target: {target_state_dict[orig_target_key].size()}")
-            print(f"  left  : {base_state_dict[target_key].size()}")
-            print(f"  right   : {sub_state_dict[target_key].size()}")
-            if unmatch_size_layer_op == "skip":
+        for base_state_dict in base_state_dicts:
+            if target_key not in base_state_dict.keys():
+                print(f"[yellow] base key not found: {target_key}, skip...[/yellow]")
                 skip_layers.append(target_key)
+                continue
+            if base_state_dict[target_key].size() != sub_state_dict[target_key].size():
+                print("\n ------------------------------------")
+                print(f"[bold red] mismatch size: {target_key}[/bold red]")
+                print("[bold]tensor size[/bold]")
+                print(f"  base: {base_state_dict[target_key].size()}")
+                print(f"  right   : {sub_state_dict[target_key].size()}")
+                if unmatch_size_layer_op == "skip":
+                    skip_layers.append(target_key)
+                    break
 
     if len(skip_layers) == 0:
         print()

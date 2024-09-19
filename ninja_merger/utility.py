@@ -21,10 +21,10 @@ def get_savename(path):
 
 def define_savename(base, sub, name_target_model, out_dir):
     target_name = get_savename(name_target_model)
-    left_name = get_savename(base)
+    left_names = [get_savename(b) for b in base]
     right_name = get_savename(sub)
 
-    left_initials = "".join([word[:3] for word in left_name.split("_")])
+    left_initials = "_".join(["".join([word[:3] for word in ln.split("_")]) for ln in left_names])
     right_initials = "".join([word[:3] for word in right_name.split("_")])
     timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
     model_name = f"{left_initials}_{right_initials}_{timestamp}"
@@ -57,5 +57,10 @@ def load_config(config_path):
         config.get("target_model_type", "llm"),
         config.get("lora_model", None),
     )
+    
+    if config.get("models") is not None and len(config.get("models")) > 0:
+        for i, model in enumerate(config.get("models")):
+            if not isinstance(model.get("left"), list):
+                config["models"][i]["left"] = [config["models"][i]["left"]]
 
     return models_list, (name_target_model, name_target_model_type, name_lora_model)
