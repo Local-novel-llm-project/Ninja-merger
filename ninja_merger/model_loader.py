@@ -30,8 +30,7 @@ def load_model(model, lora_name, device, torch_dtype):
         model = PeftModel.from_pretrained(model, lora_name, device=device)
         model = model.merge_and_unload()
         print("[green]LoRA merged[/green]")
-    state_dict = model.state_dict()
-    return model, state_dict
+    return model
 
 
 def load_vlm_model(model, lora_name, device, torch_dtype):
@@ -71,14 +70,18 @@ def load_llava_model(model, lora_name, device, torch_dtype):
 
 def load_left_right_models(model_dict, merge_models_device, torch_dtype):
     velocity = model_dict["velocity"]
-    base_weight, base_state_dict = load_model(
-        model_dict["left"], None, merge_models_device, torch_dtype
-    )
-    sub_weight, sub_state_dict = load_model(
+    # base_weight, base_state_dict = load_model(
+    #     model_dict["left"], None, merge_models_device, torch_dtype
+    # )
+    base_models = [
+        load_model(
+            model, None, merge_models_device, torch_dtype
+        ) for model in model_dict["left"] if model != "recurrent"]
+    sub_model = None if model_dict["right"] == "recurrent" else load_model(
         model_dict["right"], None, merge_models_device, torch_dtype
     )
     # del base_weight, sub_weight
-    return (base_weight, base_state_dict), (sub_weight, sub_state_dict), velocity
+    return base_models, sub_model, velocity
 
 
 def load_processor(model_name):
