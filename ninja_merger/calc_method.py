@@ -8,16 +8,7 @@ import torch
 
 import numpy as np
 
-# try:
-#     from torch_linear_assignment import (
-#         batch_linear_assignment as linear_sum_assignment,
-#         assignment_to_indices
-#     )
-#     is_torch_linear_assignment_found = True
-# except ImportError:
-#     print("WARN: torch_linear_assignment not found, using scipy version instead")
 from scipy.optimize import linear_sum_assignment
-    # is_torch_linear_assignment_found = False
 
 
 def Add(v, base_state_dict, sub_state_dict, velocity):
@@ -169,15 +160,8 @@ def GitReBasin(v1, v2s, preprocess_velocity=None, **kwargs):
         is_not_list = True
         v2s = [v2s]
 
-    # layer_name = kwargs.get("layer_name", None)
-    # if layer_name is None:
-    #     raise ValueError("layer_nameをkwargsで指定してください。")
-
-    # permutation_dict = kwargs.get("permutation_dict", {})
-
     print(f"===== Processing layer =====")
     print(f"v1 shape: {v1.shape}")
-    # print(f"v2s[0] shape: {v2s[0].shape}")
     
     for iv2 in range(len(v2s)):
         # バイアス項や1次元テンソルの場合、パーミュテーションは不要
@@ -185,12 +169,6 @@ def GitReBasin(v1, v2s, preprocess_velocity=None, **kwargs):
             # aligned_v2 = v2
             print("This layer does not require permutation (bias or 1D tensor).")
         else:
-            # if layer_name in permutation_dict:
-            #     # 既に計算済みのパーミュテーションを適用
-            #     col_ind = permutation_dict[layer_name]
-            #     print(f"Using existing permutation for layer '{layer_name}'.")
-            # else:
-            
             # テンソルを2次元に変形
             v1_flat = v1.view(v1.size(0), -1)
             v2_flat = v2s[iv2].view(v2s[iv2].size(0), -1)
@@ -221,31 +199,11 @@ def GitReBasin(v1, v2s, preprocess_velocity=None, **kwargs):
             
             del norm_v1, norm_v2
 
-            # コスト行列を作成（類似度の負をコストとする）
-            # cost_matrix = -similarity.cpu().numpy().astype(np.float32)
-            # print("Converted similarity matrix to cost matrix.")
-
-            # 線形割当問題を解く
-            # row_ind, col_ind = linear_sum_assignment(cost_matrix)
+            # コスト行列を作成（類似度の負をコストとする）し、線形割当問題を解く
             row_ind, col_ind = linear_sum_assignment(-similarity.cpu().numpy().astype(np.float32))
-            # if is_torch_linear_assignment_found:
-            #     row_ind, col_ind = assignment_to_indices(linear_sum_assignment(-similarity[None, :]))
-            # else:
-            #     row_ind, col_ind = linear_sum_assignment(-similarity)
-            # permutation_dict[layer_name] = col_ind
-            # print(f"Calculated new permutation for layer '{layer_name}'.")
 
             # v2 をパーミュテーション
-            # aligned_v2 = v2[col_ind]
             v2s[iv2] = v2s[iv2][col_ind]
-            # print(f"Applied permutation to v2 for layer '{layer_name}'.")
-            
-            # del similarity, cost_matrix, row_ind, col_ind
-            # gc.collect()
-
-    # # ベースモデルとパーミューテーション後のモデルを線形補間
-    # result = (1 - velocity) * v1 + velocity * aligned_v2
-    # print(f"Interpolated parameters for layer '{layer_name}'.\n")
     
     if is_not_list:
         return v1, v2s[0]
