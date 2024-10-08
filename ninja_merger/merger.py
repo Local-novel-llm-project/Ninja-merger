@@ -25,6 +25,8 @@ def merge(
     skip_layers,
     operation,
     post_operation,
+    preprocess,
+    post_preprocess,
     normalization,
     include_layers,
     exclude_layers,
@@ -42,7 +44,11 @@ def merge(
         target = target_model.state_dict()
         
     sub_state_dict = sub_models.state_dict()
-
+    
+    preprocess_dict = {
+        "none": lambda x, y, v, **kwargs: (x, y),
+        "pcd": calc_method.GitReBasin,
+    }
     operation_dict = {
         "add": calc_method.Add,
         "sub": calc_method.Sub,
@@ -107,10 +113,12 @@ def merge(
                 v.copy_(
                     normalization_dict[normalization](
                         post_operation_dict[post_operation],
-                        v,
-                        [operation_dict[operation](
-                            v, b.state_dict()[k], sub_state_dict[k], velocity
-                        ) for b in base_models],
+                        *preprocess_dict[post_preprocess](
+                            v,
+                            [operation_dict[operation](
+                                v, *preprocess_dict[preprocess](b.state_dict()[k], sub_state_dict[k]), velocity
+                            ) for b in base_models],
+                        ),
                         post_velocity,
                     )
                 )
@@ -132,13 +140,17 @@ def merge(
                 get_slice_to(v, min_size).copy_(
                     normalization_dict[normalization](
                         post_operation_dict[post_operation],
-                        get_slice_to(v, min_size),
-                        [operation_dict[operation](
+                        *preprocess_dict[post_preprocess](
                             get_slice_to(v, min_size),
-                            get_slice_to(b.state_dict()[k], min_size),
-                            get_slice_to(sub_state_dict[k], min_size),
-                            velocity,
-                        ) for b in base_models],
+                            [operation_dict[operation](
+                                get_slice_to(v, min_size),
+                                *preprocess_dict[preprocess](
+                                    get_slice_to(b.state_dict()[k], min_size),
+                                    get_slice_to(sub_state_dict[k], min_size),
+                                ),
+                                velocity,
+                            ) for b in base_models],
+                        ),
                         post_velocity,
                     )
                 )

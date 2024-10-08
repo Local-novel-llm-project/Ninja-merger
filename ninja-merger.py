@@ -113,7 +113,10 @@ def main(args):
             include_layers = model_dict.get("include_layers", None)
             exclude_layers = model_dict.get("exclude_layers", None)
             drop_layers = model_dict.get("drop_layers", None)
+            operation = model_dict.get("operation", "sub")
             post_operation = model_dict.get("post_operation", "add")
+            preprocess = model_dict.get("preprocess", "none")
+            post_preprocess = model_dict.get("post_preprocess", "none")
             post_velocity = model_dict.get("post_velocity", 1.0)
             normalization = model_dict.get("normalization", "none")
             unmatch_size_layer_op = model_dict.get("unmatch_size_layer_op", "skip")
@@ -136,8 +139,10 @@ def main(args):
                     velocity,
                     post_velocity,
                     skip_layers,
-                    model_dict["operation"],
+                    operation,
                     post_operation,
+                    preprocess,
+                    post_preprocess,
                     normalization,
                     include_layers,
                     exclude_layers,
@@ -156,8 +161,10 @@ def main(args):
                     velocity,
                     post_velocity,
                     skip_layers,
-                    model_dict["operation"],
+                    operation,
                     post_operation,
+                    preprocess,
+                    post_preprocess,
                     normalization,
                     include_layers,
                     exclude_layers,
