@@ -1,0 +1,131 @@
+# config.yaml (チートシート)
+
+# グローバル設定 (モデル全体に適用される設定)
+# ----------------------------------------
+torch_dtype: bfloat16  # モデルの読み込み/保存に使用するデータ型 (float32, bfloat16 など)
+skip_layernorm: false # True に設定すると、レイヤー正規化層をマージから除外
+
+# マージ設定 (複数のマージ設定をリスト形式で記述可能)
+# ----------------------------------------
+models:
+  - name: my_merge_config_1  # (オプション) マージ設定の名前 (ファイル名の一部に使用)
+
+    target: null
+
+    # --- マージするモデル (左側) ---
+    left:
+      - model1.safetensors     # モデルのパス (相対パスまたは絶対パス)
+      # - model2.safetensors  # 複数のモデルを指定可能
+
+    # --- マージするモデル (右側) ---
+    right:
+      - model3.safetensors
+      # - model4.pth
+
+    # --- マージ結果の出力先 ---
+    #   null: 新しいモデルを作成 (デフォルト)
+    #   "recurrent": 前回のマージ結果を上書き
+    #   既存のモデルのパス: 指定したモデルを上書き
+
+    # --- マージ方法 ---
+    operation: add  # 加算 (add, sub, mul, div, mix, avg, concat, maxpool, minpool, geometric_mean, std_sub, widen, complexadd, angle_merge, complex_angle_merge, qeic_add, qeic_mix, qeic_sub)
+
+    # --- レイヤーごとの velocity (オプション) ---
+    #   辞書形式で指定: {レイヤー名 (またはパターン): velocity 値}
+    #   DEFAULT キーでデフォルト値を指定可能 (省略時は 1.0)
+    velocities:
+      "model.embed_tokens.": 0.1  # embedding 層
+      "model.layers.0.": 0.2     # 最初の layer
+      "model.layers.1.": 0.3
+      "model.layers.(\d+).":    # 正規表現で layer を指定 (キャプチャグループを使用可能)
+        type: regex
+        value: "0.4 + 0.01 * int(match.group(1))"  # layer 番号に応じて増加 (例: 0.41, 0.42, 0.43, ...)
+      "model.layers.(1[0-9]|2[0-3]).": # 正規表現
+        type: regex
+        value: 0.9
+      "model.norm.": 0.7          # 最後の normalization
+      "lm_head.": 0.8             # 言語モデルの head
+      "DEFAULT": 0.5              # デフォルト値 (上記のパターンにマッチしないレイヤーに適用)
+      # 注意: complex_angle_merge の場合は、この velocities は無視され、velocity の値が使用される
+
+    # --- レイヤーごとの post_velocity (オプション) ---
+    #   velocities と同様の形式で指定
+    post_velocities:
+      "model.embed_tokens.": 1.5
+      "model.layers.0.": 1.2
+      "model.layers.1.": 1.0
+      "model.layers.(\d+).":
+        type: regex
+        value: "1.0 - 0.005 * int(match.group(1))"
+      "model.norm.": 0.9
+      "lm_head.": 1.1
+      "DEFAULT": 1.0
+
+    # --- モデル全体に適用する velocity (オプション, velocities が指定されていない場合) ---
+    velocity: 1.0  # 単一の値 (スカラーまたは複素数)
+    # velocity: 0.2+0.3j  # 複素数の例
+
+    # --- モデル全体に適用する post_velocity (オプション, post_velocities が指定されていない場合) ---
+    post_velocity: 1.0
+
+    # --- マージ後に適用する演算 (後処理) (オプション) ---
+    post_operation: add  # (add, sub, subfrom, mul, div, divby, mix, concat, maxpool, minpool, geometric_mean, angle)
+
+    # --- 前処理 ---
+    preprocess: none # (none, pcd)
+
+    # --- 後処理 ---
+    post_preprocess: none # (none)
+
+    # --- 正規化 ---
+    normalization: none # (none, norm_std_mean, match_std_mean, proc_std_mean, angle_merge)
+
+    # --- マージに含める/除外するレイヤー (オプション) ---
+    include_layers: null # カンマ区切りの文字列、またはリストで指定 (例: "model.layers.0,model.layers.1", ["model.layers.0", "model.layers.1"])
+    exclude_layers: null # include_layers と同様
+    drop_layers: null    # include_layers と同様
+
+    # --- レイヤーサイズが一致しない場合の挙動 ---
+    unmatch_size_layer_op: skip  # skip (スキップ), only_common_range (共通部分のみを使用)
+
+    # --- force_merge_single ---
+    force_merge_single: False
+
+    # --- v2s_empty_default ---
+    v2s_empty_default: v1
+
+    # --- v2s_single_default ---
+    v2s_single_default: auto
+
+    # --- 各モデルに適用する詳細設定 (キー変換、レイヤー挿入) ---
+    model_config:
+      model1.safetensors:  # モデル名 (パス)
+
+        # --- キー変換 ---
+        key_transformations:
+          - type: replace  # 単純な文字列置換
+            replace:
+              "old_prefix.": "new_prefix."  # "old_prefix.xxx" -> "new_prefix.xxx"
+              "another_old.": "another_new."
+          - type: regex  # 正規表現による置換
+            regex: "^transformer\.(.*)"  # "transformer.xxx" -> "model.xxx"
+            replace: "model.\\1"  # キャプチャグループを使用
+
+        # --- レイヤー挿入 ---
+        insert_layers:
+          - source_model: extra_layers.safetensors  # 挿入元のモデル
+            source_key: "extra_layer.0.weight"  # 挿入元のレイヤー
+            target_key: "model.layers.10.extra_layer.weight"  # 挿入先のレイヤー (上書き)
+
+      model3.safetensors:
+        # (model3.safetensors に適用する設定 ...)
+        key_transformations:
+          - type: regex
+            regex: "^left2.(.*)"
+            replace: "left_two.\\1"
+
+      # (他のモデルの設定 ...)
+
+  # (別のマージ設定)
+  - name: my_merge_config_2
+    # ...
