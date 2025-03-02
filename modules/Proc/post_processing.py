@@ -1,7 +1,7 @@
 from typing import Callable
 
 import torch
-from Utils.operation_dicts import POST_OPERATION_DICT  # POST_OPERATION_DICTをimport
+from ..Utils.operation_dicts import POST_OPERATION_DICT  # POST_OPERATION_DICTをimport
 
 
 def post_process_tensor(

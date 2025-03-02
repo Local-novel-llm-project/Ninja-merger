@@ -1,8 +1,12 @@
+# Merger/qeic_merger.py
+
 import torch
-from Calc.qeic_calc import calculate_correlation_matrices
-from Merger.base import Merger
-from Utils.layers import is_qeic_target_layer
-from Utils.operation_dicts import OPERATION_DICTS
+
+from ..Calc.qeic_calc import calculate_correlation_matrices
+from ..Merger.base import Merger
+from ..Utils.layers import is_qeic_target_layer
+from ..Utils.operation_dicts import OPERATION_DICT
+from ..Utils.utility import prepare_tensor_slices
 
 
 class QeicMerger(Merger):
@@ -40,7 +44,7 @@ class QeicMerger(Merger):
                 self.console.print(
                     f"[red]Shape mismatch for {k}: Base: {base_shapes}, Sub: {sub_shapes}[/red]"
                 )
-                # サイズ不一致があるレイヤーはスキップ
+
                 self.console.print(
                     f"[yellow]Skipping layer {k} due to shape mismatch[/yellow]"
                 )
@@ -57,8 +61,16 @@ class QeicMerger(Merger):
                 self.excluded_layers.append(target_k)
                 continue
 
-            v_slice, base_slices, sub_slices, _ = self._prepare_tensor_slices(k)
-            self._log_operation_details()
+            # 変更: ヘルパー関数を使用
+            v_slice, base_slices, sub_slices, _ = prepare_tensor_slices(
+                self.target_state_dict,
+                k,
+                self.base_models,
+                self.sub_models,
+                self.unmatch_size_layer_op,
+                self.console,
+            )
+            self._log_operation_details(k)
 
             # ベースとサブのスライスが空でないことを確認
             if not base_slices or not sub_slices:
@@ -109,7 +121,7 @@ class QeicMerger(Merger):
                     ) = calculate_correlation_matrices(
                         base_model,
                         sub_model,
-                        [k],  # 現在のレイヤーのみ
+                        [k],
                         self.model_dict.get("qeic_corr_method", "pearson"),
                         v_slice.device,
                     )
@@ -136,10 +148,11 @@ class QeicMerger(Merger):
             }
 
             try:
-                merged_weight = OPERATION_DICTS[self.operation](
+                # 変更: Utils からインポートした OPERATION_DICTS を使用
+                merged_weight = OPERATION_DICT[self.operation](
                     v_slice, base_slices[0], sub_slices[0], self.velocity, **kwargs
                 )
-                v_slice.copy_(merged_weight)  # 結果をコピー
+                v_slice.copy_(merged_weight)
             except Exception as e:
                 self.console.print(f"[red]Error during QEIC operation: {e}[/red]")
                 self.console.print(f"[yellow]Skipping layer {k} due to error[/yellow]")

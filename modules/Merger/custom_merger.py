@@ -1,14 +1,16 @@
+# Merger/custom_merger.py
 import torch
-from Merger.base import Merger
 from rich.panel import Panel
-from Utils.operation_dicts import OPERATION_DICTS
+
+from ..Merger.base import Merger
+from ..Utils.operation_dicts import OPERATION_DICT
+from ..Utils.utility import prepare_tensor_slices
 
 
 class CustomMerger(Merger):
     """Widen などの特殊なマージを行うMerger クラス。"""
 
     def merge(self) -> torch.nn.Module:
-        # ... (CustomMerger の実装) ...
         self.console.rule("[bold blue]Starting Custom Model Merge Process[/bold blue]")
         self._filter_layers()
 
@@ -27,7 +29,15 @@ class CustomMerger(Merger):
                 self.excluded_layers.append(target_k)
                 continue
 
-            v_slice, base_slices, sub_slices, min_size = self._prepare_tensor_slices(k)
+            # 変更: ヘルパー関数を使用
+            v_slice, base_slices, sub_slices, min_size = prepare_tensor_slices(
+                self.target_state_dict,
+                k,
+                self.base_models,
+                self.sub_models,
+                self.unmatch_size_layer_op,
+                self.console,
+            )
             self._log_operation_details()
 
             if self.operation == "widen":
@@ -39,13 +49,14 @@ class CustomMerger(Merger):
                     )
                 )
                 try:
-                    merged_weight = OPERATION_DICTS[self.operation](
+                    # 変更: Utils からインポートした OPERATION_DICT を使用
+                    merged_weight = OPERATION_DICT[self.operation](
                         self.target,
                         self.base_models,
                         self.sub_models,
                         target_k,
-                        t=self.velocity,
-                        s=1.0,
+                        t=self.velocity,  # ここ、self.velocity で良い？
+                        s=1.0,  # ここ、s は設定から取得する？
                     )
 
                 except Exception as e:

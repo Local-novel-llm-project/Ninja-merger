@@ -1,11 +1,12 @@
 from typing import Any, Dict, List, Union
 
 import torch
-from Merger.base import Merger
-from Merger.basic_merger import BasicMerger
-from Merger.complex_merger import ComplexMerger
-from Merger.custom_merger import CustomMerger
-from Merger.qeic_merger import QeicMerger
+
+from ..Merger.base import Merger
+from ..Merger.basic_merger import BasicMerger
+from ..Merger.complex_merger import ComplexMerger
+from ..Merger.custom_merger import CustomMerger
+from ..Merger.qeic_merger import QeicMerger
 
 
 class MergerFactory:

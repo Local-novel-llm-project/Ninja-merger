@@ -1,5 +1,6 @@
 import torch
-from Utils.operation_dicts import PREPROCESS_DICT  # PREPROCESS_DICTをimport
+
+from ..Utils.operation_dicts import PREPROCESS_DICT  # PREPROCESS_DICTをimport
 
 
 def preprocess_tensor(tensor: torch.Tensor, preprocess_type: str, *args, **kwargs):

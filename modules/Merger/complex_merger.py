@@ -1,15 +1,20 @@
+# Merger/complex_merger.py
+
 import torch
-from Calc.complex_calc import ComplexMix, norm_angle_t_calc
-from Merger.base import Merger
 from rich.panel import Panel
-from Utils.operation_dicts import OPERATION_DICTS, POST_OPERATION_DICT
+
+from ..Calc.complex_calc import ComplexMix, norm_angle_t_calc
+from ..Merger.base import Merger
+from ..Utils.operation_dicts import OPERATION_DICT, POST_OPERATION_DICT
+from ..Utils.utility import (
+    prepare_tensor_slices,
+)
 
 
 class ComplexMerger(Merger):
     """複素数関連の演算を行う Merger クラス。"""
 
     def merge(self) -> torch.nn.Module:
-        # ... (ComplexMerger の実装) ...
         self.console.rule("[bold blue]Starting Complex Model Merge Process[/bold blue]")
         self._filter_layers()
 
@@ -27,7 +32,16 @@ class ComplexMerger(Merger):
             if not self._check_layer_compatibility(k):
                 self.excluded_layers.append(target_k)
                 continue
-            v_slice, base_slices, sub_slices, min_size = self._prepare_tensor_slices(k)
+
+            # 変更: ヘルパー関数を使用
+            v_slice, base_slices, sub_slices, min_size = prepare_tensor_slices(
+                self.target_state_dict,
+                k,
+                self.base_models,
+                self.sub_models,
+                self.unmatch_size_layer_op,
+                self.console,
+            )
             self._log_operation_details(k)
 
             # velocity を取得 (レイヤーごとに異なる可能性がある)
@@ -45,17 +59,17 @@ class ComplexMerger(Merger):
                 )
                 try:
                     avg = sum(sub_slices) / len(sub_slices)
-                    t = torch.tensor(0.1).to(self.velocity.device)
+                    t = torch.tensor(0.1).to(
+                        self.velocity.device
+                    )  # これ、velocity が複素数の場合は？
                     before_tensor = v_slice
 
                     self._display_tensor_info(
                         "ComplexAdd - Before", before_tensor, "yellow"
                     )
 
-                    processed_v = OPERATION_DICTS[
-                        self.operation
-                    ](  # operation_dictsから直接
-                        v_slice, avg, t, self.velocity
+                    processed_v = OPERATION_DICT[self.operation](
+                        v_slice, avg, t, velocity
                     )
 
                     self._display_tensor_info(
@@ -86,13 +100,12 @@ class ComplexMerger(Merger):
                         "AngleMerge - Before", before_tensor, "yellow"
                     )
 
-                    processed_v = OPERATION_DICTS[
-                        self.operation
-                    ](  # operation_dicts から直接
-                        POST_OPERATION_DICT[self.post_operation],  # operation_dictsから
+                    # 変更: Utils からインポートした OPERATION_DICT を使用
+                    processed_v = OPERATION_DICT[self.operation](
+                        POST_OPERATION_DICT[self.post_operation],  # ここも
                         v_slice,
                         sub_slices,
-                        self.velocity,
+                        velocity,  # ここ、velocityで良い？
                         self.force_merge_single,
                         self.v2s_empty_default,
                         self.v2s_single_default,
@@ -143,12 +156,11 @@ class ComplexMerger(Merger):
                         "ComplexAngleMerge - Before", before_tensor, "yellow"
                     )
 
-                    processed_v = OPERATION_DICTS[
-                        self.operation
-                    ](  # operation_dictsから
+                    # 変更: Utils からインポートした OPERATION_DICT を使用
+                    processed_v = OPERATION_DICT[self.operation](
                         v_slice,
                         sub_slices,
-                        self.velocity,
+                        velocity,  # ここ、velocityで良い？
                         complex_mix_func=ComplexMix,
                         t_calc_func=norm_angle_t_calc,
                         **{"layer_key": k},

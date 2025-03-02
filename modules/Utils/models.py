@@ -67,7 +67,7 @@ def apply_transformations(model, model_config):
         insertions = model_config["insert_layers"]
         for insertion in insertions:
             # 挿入元のモデルを読み込む
-            from Utils.loaders import load_model
+            from ..Utils.loaders import load_model
 
             source_model = load_model(
                 insertion["source_model"],
@@ -156,9 +156,9 @@ def load_and_prepare_models(model_dict, merge_models_device, torch_dtype):
             velocity (dict or float or complex): レイヤーごとのvelocity(dict)または、モデル全体に適用されるvelocity(float, complex)。
             post_velocity (dict or float): レイヤーごとのpost_velocity(dict) または、モデル全体に適用されるpost_velocity(float)。
     """
-    from Utils.layers import prepare_post_velocities, prepare_velocities
-    from Utils.loaders import load_model
-    from Utils.models import apply_transformations, merge_lora
+    from ..Utils.layers import prepare_post_velocities, prepare_velocities
+    from ..Utils.loaders import load_model
+    from ..Utils.models import apply_transformations, merge_lora
 
     base_models = []
     for model_name in model_dict["left"]:

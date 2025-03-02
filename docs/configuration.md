@@ -1,4 +1,3 @@
-
 # `config.yaml` ドキュメント
 
 このドキュメントでは、Ninja-merger の設定ファイルである `config.yaml` の書き方について詳細に説明します。

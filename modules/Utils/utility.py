@@ -171,6 +171,11 @@ def get_slice_to(t, indice):
         return t
 
 
+def slice_tensor(t, indices):  # get_slice_toから変更
+    """テンソルを指定されたインデックスでスライスする。"""
+    return t[tuple([slice(None, i) for i in indices] + [Ellipsis])]
+
+
 def scale_tensor_inplace(tensor, threshold, scale_factor):
     """
     テンソル内の閾値以下の値をスケーリングする (inplace)。
@@ -186,3 +191,57 @@ def scale_tensor_inplace(tensor, threshold, scale_factor):
     mask = torch.abs(tensor) < threshold
     tensor[mask] *= scale_factor
     return tensor
+
+
+def prepare_tensor_slices(
+    target_state_dict, key, base_models, sub_models, unmatch_size_layer_op, console
+):
+    """テンソルのスライスを準備するヘルパー関数。"""
+    v = target_state_dict[key]
+
+    if unmatch_size_layer_op == "only_common_range":
+        min_size = min(
+            v.shape,
+            *[b.state_dict()[key].shape for b in base_models if key in b.state_dict()],
+            *[s.state_dict()[key].shape for s in sub_models if key in s.state_dict()],
+        )
+        console.print(
+            f"  [cyan]Merging only common range for layer {key}. Common size: {min_size}[/cyan]"
+        )
+    else:
+        min_size = v.shape
+
+    v_slice = (
+        slice_tensor(v, min_size) if unmatch_size_layer_op == "only_common_range" else v
+    )
+    base_slices = [
+        slice_tensor(b.state_dict()[key], min_size)
+        if unmatch_size_layer_op == "only_common_range"
+        else b.state_dict()[key]
+        for b in base_models
+        if key in b.state_dict()
+    ]
+    sub_slices = [
+        slice_tensor(s.state_dict()[key], min_size)
+        if unmatch_size_layer_op == "only_common_range"
+        else s.state_dict()[key]
+        for s in sub_models
+        if key in s.state_dict()
+    ]
+    return v_slice, base_slices, sub_slices, min_size
+
+
+def to_complex_tensor(val, device, dtype):
+    """
+    数値または複素数を複素数テンソルに変換するヘルパー関数
+    """
+    if isinstance(val, complex):
+        return torch.complex(
+            torch.tensor(val.real, device=device, dtype=dtype),
+            torch.tensor(val.imag, device=device, dtype=dtype),
+        )
+    else:
+        return torch.complex(
+            torch.tensor(float(val), device=device, dtype=dtype),
+            torch.tensor(0.0, device=device, dtype=dtype),
+        )

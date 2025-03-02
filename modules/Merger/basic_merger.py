@@ -1,9 +1,10 @@
 import torch
-from Merger.base import Merger
-from Proc.normalization import normalize_tensor
-from Proc.post_processing import post_process_tensor
-from Proc.pre_processing import preprocess_tensor
-from Utils.operation_dicts import OPERATION_DICTS
+
+from ..Merger.base import Merger
+from ..Proc.normalization import normalize_tensor
+from ..Proc.post_processing import post_process_tensor
+from ..Proc.pre_processing import preprocess_tensor
+from ..Utils.operation_dicts import OPERATION_DICT
 
 
 class BasicMerger(Merger):
@@ -16,7 +17,7 @@ class BasicMerger(Merger):
         for k in torch.utils.data.DataLoader(
             list(self.target_state_dict.keys()), batch_size=1
         ):
-            k = k[0]  # バッチから取り出す
+            k = k[0]
             if k not in self.included_layers:
                 continue
 
@@ -25,12 +26,10 @@ class BasicMerger(Merger):
                 continue
 
             v_slice, base_slices, sub_slices, _ = self._prepare_tensor_slices(k)
-            self._log_operation_details(k)  # 修正
-
+            self._log_operation_details(k)
             try:
                 base_processed_values = []
 
-                # velocity を取得 (レイヤーごとに異なる可能性がある)
                 velocity = (
                     self.velocity[k]
                     if isinstance(self.velocity, dict)
@@ -44,7 +43,7 @@ class BasicMerger(Merger):
                         zip(sub_slices, self.sub_models)
                     ):
                         if id(b_slice) != id(s_slice):
-                            processed = OPERATION_DICTS[self.operation](
+                            processed = OPERATION_DICT[self.operation](
                                 v_slice,
                                 b_slice,
                                 s_slice,
@@ -68,8 +67,8 @@ class BasicMerger(Merger):
                     processed_v = normalize_tensor(
                         processed_v,
                         self.normalization,
-                        v_slice,  # normalization に元の v_slice も渡す
-                        base_processed_values,  # normalizationにbase_processed_valuesを渡す
+                        v_slice,
+                        base_processed_values,
                     )
 
                 # 後処理
@@ -78,11 +77,11 @@ class BasicMerger(Merger):
                     self.post_operation,
                     self.post_velocity[k]
                     if isinstance(self.post_velocity, dict)
-                    else self.post_velocity,  # 修正
+                    else self.post_velocity,
                     v_slice,
                 )
 
-                v_slice.copy_(processed_v)  # 結果のコピー
+                v_slice.copy_(processed_v)
 
             except Exception as e:
                 self.console.print(

@@ -1,3 +1,4 @@
+# Merger/base.py
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Union
 
@@ -5,14 +6,13 @@ import torch
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
-from Utils import operation_dicts
-from Utils.layers import (
+
+from ..Utils.layers import (
     is_layer_dropped,
     is_layer_included,
     parse_layer_specifications,
 )
-
-console = Console()
+from ..Utils.utility import to_complex_tensor
 
 
 class Merger(ABC):
@@ -29,7 +29,7 @@ class Merger(ABC):
         ],
         post_velocity: Union[
             float, complex, torch.Tensor, Dict[str, Union[float, complex, torch.Tensor]]
-        ],  # 型を変更
+        ],
         skip_layers: List[str],
         operation: str,
         post_operation: str,
@@ -46,7 +46,6 @@ class Merger(ABC):
         v2s_single_default: str = "auto",
         model_dict: Dict[str, Any] = None,
     ):
-        # ... (初期化処理は変更なし) ...
         self.skip_layernorm = skip_layernorm
         self.target_model = target_model
         self.base_models = base_models
@@ -69,8 +68,6 @@ class Merger(ABC):
         self.v2s_single_default = v2s_single_default
         self.model_dict = model_dict
         self.console = Console()
-
-        # ...
 
         # ターゲットモデルの初期化
         self.target = target_model if target_model is not None else base_models[0]
@@ -96,58 +93,8 @@ class Merger(ABC):
         """モデルをマージする抽象メソッド。具象クラスで実装が必要。"""
         pass
 
-    # ... (ヘルパーメソッド群もここに) ...
-    def _prepare_tensor_slices(
-        self, k: str
-    ) -> tuple[torch.Tensor, List[torch.Tensor], List[torch.Tensor], torch.Size]:
-        """テンソルのスライスを準備するヘルパー関数。"""
-        # ... 実装は変更なし ...
-        v = self.target_state_dict[k]
-
-        if self.unmatch_size_layer_op == "only_common_range":
-            min_size = min(
-                v.shape,
-                *[
-                    b.state_dict()[k].shape
-                    for b in self.base_models
-                    if k in b.state_dict()
-                ],
-                *[
-                    s.state_dict()[k].shape
-                    for s in self.sub_models
-                    if k in s.state_dict()
-                ],
-            )
-            self.console.print(
-                f"  [cyan]Merging only common range for layer {k}. Common size: {min_size}[/cyan]"
-            )
-        else:
-            min_size = v.shape
-
-        v_slice = (
-            operation_dicts.get_slice_to(v, min_size)
-            if self.unmatch_size_layer_op == "only_common_range"
-            else v
-        )
-        base_slices = [
-            operation_dicts.get_slice_to(b.state_dict()[k], min_size)
-            if self.unmatch_size_layer_op == "only_common_range"
-            else b.state_dict()[k]
-            for b in self.base_models
-            if k in b.state_dict()
-        ]
-        sub_slices = [
-            operation_dicts.get_slice_to(s.state_dict()[k], min_size)
-            if self.unmatch_size_layer_op == "only_common_range"
-            else s.state_dict()[k]
-            for s in self.sub_models
-            if k in s.state_dict()
-        ]
-        return v_slice, base_slices, sub_slices, min_size
-
     def _check_layer_compatibility(self, k: str) -> bool:
         """レイヤーの互換性をチェックするヘルパー関数。"""
-        # ... 実装は変更なし ...
         v = self.target_state_dict[k]
 
         if self.unmatch_size_layer_op == "skip":
@@ -172,29 +119,49 @@ class Merger(ABC):
                 f"  [{prefix}]{title} - First 5 elements: {tensor.flatten()[:5]}[/{prefix}]"
             )
 
-    def _log_operation_details(self, k):  # キーを追加
-        """操作の詳細をログに出力する関数."""
+    def _log_operation_details(self, k):
+        """操作の詳細をログに出力する関数。"""
+        # 修正: to_complex_tensor を使用
         if isinstance(self.velocity, dict):
-            velocity_display = self.velocity.get(
-                k, "N/A"
-            )  # レイヤーに対応する velocity を取得
-            if (
-                isinstance(velocity_display, torch.Tensor)
-                and velocity_display.is_complex()
-            ):
-                velocity_display = f"{velocity_display.real.item():.4f}+{velocity_display.imag.item():.4f}j"
-            elif isinstance(velocity_display, complex):
-                velocity_display = (
-                    f"{velocity_display.real:.4f}+{velocity_display.imag:.4f}j"
-                )
+            velocity_display = to_complex_tensor(
+                self.velocity.get(k, 0.0),  # デフォルト値 0.0
+                self.target_state_dict[k].device,
+                self.target_state_dict[k].dtype,
+            )
         else:
-            velocity_display = self.velocity
-            if isinstance(self.velocity, torch.Tensor) and self.velocity.is_complex():
-                velocity_display = (
-                    f"{self.velocity.real.item():.4f}+{self.velocity.imag.item():.4f}j"
-                )
-            elif isinstance(self.velocity, complex):
-                velocity_display = f"{self.velocity.real:.4f}+{self.velocity.imag:.4f}j"
+            velocity_display = to_complex_tensor(
+                self.velocity,
+                self.target_state_dict[k].device,
+                self.target_state_dict[k].dtype,
+            )
+        if isinstance(self.post_velocity, dict):
+            post_velocity_display = to_complex_tensor(
+                self.post_velocity.get(k, 0.0),  # デフォルト値 0.0
+                self.target_state_dict[k].device,
+                self.target_state_dict[k].dtype,
+            )
+        else:
+            post_velocity_display = to_complex_tensor(
+                self.post_velocity,
+                self.target_state_dict[k].device,
+                self.target_state_dict[k].dtype,
+            )
+        if isinstance(velocity_display, torch.Tensor) and velocity_display.is_complex():
+            velocity_display = f"{velocity_display.real.item():.4f}+{velocity_display.imag.item():.4f}j"
+        elif isinstance(velocity_display, complex):
+            velocity_display = (
+                f"{velocity_display.real:.4f}+{velocity_display.imag:.4f}j"
+            )
+
+        if (
+            isinstance(post_velocity_display, torch.Tensor)
+            and post_velocity_display.is_complex()
+        ):
+            post_velocity_display = f"{post_velocity_display.real.item():.4f}+{post_velocity_display.imag.item():.4f}j"
+        elif isinstance(post_velocity_display, complex):
+            post_velocity_display = (
+                f"{post_velocity_display.real:.4f}+{post_velocity_display.imag:.4f}j"
+            )
 
         self.console.print(
             Panel(
@@ -204,7 +171,7 @@ class Merger(ABC):
                 f"Normalization: {self.normalization}\n"
                 f"Post-operation: {self.post_operation}\n"
                 f"Post-preprocess: {self.post_preprocess}\n"
-                f"Post-velocity: {self.post_velocity}",
+                f"Post-velocity: {post_velocity_display}",
                 title="[bold]Merge Info[/bold]",
                 style="cyan",
             )

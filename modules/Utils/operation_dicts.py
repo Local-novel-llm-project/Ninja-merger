@@ -1,4 +1,4 @@
-from Calc.basic_calc import (
+from ..Calc.basic_calc import (
     Add,
     Avg,
     Concatenation,
@@ -23,17 +23,17 @@ from Calc.basic_calc import (
     StdSub,
     Sub,
 )
-from Calc.complex_calc import (
+from ..Calc.complex_calc import (
     ComplexAdd,
     ComplexAngleMerge,
     ComplexMix,
 )
-from Calc.custom_calc import WidenMerge
-from Calc.norm_calc import MatchStdMean, NormAngleMerge, NormStdMean, ProcStdMean
-from Calc.process_calc import GitReBasin, QuantileMatch
-from Calc.qeic_calc import QeicAdd, QeicMix, QeicSub
+from ..Calc.custom_calc import WidenMerge
+from ..Calc.norm_calc import MatchStdMean, NormAngleMerge, NormStdMean, ProcStdMean
+from ..Calc.process_calc import GitReBasin, QuantileMatch
+from ..Calc.qeic_calc import QeicAdd, QeicMix, QeicSub
 
-OPERATION_DICTS = {
+OPERATION_DICT = {
     "add": Add,
     "sub": Sub,
     "mul": Mul,

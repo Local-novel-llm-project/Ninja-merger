@@ -1,7 +1,7 @@
 from typing import List
 
 import torch
-from Utils.operation_dicts import NORMALIZATION_DICT  # NORMALIZATION_DICTをimport
+from ..Utils.operation_dicts import NORMALIZATION_DICT  # NORMALIZATION_DICTをimport
 
 
 def normalize_tensor(
