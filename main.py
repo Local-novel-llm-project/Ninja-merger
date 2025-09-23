@@ -52,8 +52,14 @@ def main(args):
         metadata = prepare_model_metadata(model_dict)
 
         target_value = metadata["target_value"]  # model_dict.get("target")
+        # Normalize list targets like ["recurrent"] to a scalar for control flow
+        target_value_scalar = (
+            target_value[0]
+            if isinstance(target_value, list) and len(target_value) == 1
+            else target_value
+        )
 
-        if target_value == "recurrent":
+        if target_value_scalar == "recurrent":
             if target_model is None:
                 console.print(
                     "[red]Error: 'recurrent' target specified, but no previous merge has been performed.[/red]"
@@ -61,21 +67,19 @@ def main(args):
                 sys.exit(1)
             console.print("  Using 'recurrent' target (result of previous merge).")
 
-        elif target_value is None or target_value == "null":
+        elif target_value_scalar is None or target_value_scalar == "null":
             target_model = None
             console.print("  Using 'null' target (creating a new model).")
 
         else:
             try:
-                console.print(f"  Loading target model: {target_value}")
-                target_model = load_model(
-                    target_value, target_model_device, torch_dtype
-                )
+                console.print(f"  Loading target model: {target_value_scalar}")
+                target_model = load_model(target_value_scalar, target_model_device, torch_dtype)
                 # if target_value.lower() in ["llava", "vlm", "llava-next"]:
                 #     is_llava_next = True
             except Exception as e:
                 console.print(
-                    f"[red]Error loading target model '{target_value}': {e}[/red]"
+                    f"[red]Error loading target model '{target_value_scalar}': {e}[/red]"
                 )
                 sys.exit(1)
 
@@ -283,7 +287,7 @@ def main(args):
 
         try:
             try:
-                if target_value == "recurrent":
+                if target_value_scalar == "recurrent":
                     console.print("    Saving tokenizer from previous target model...")
                     try:
                         tokenizer = AutoTokenizer.from_pretrained(
@@ -296,7 +300,7 @@ def main(args):
                             f"[yellow]Warning: Could not save tokenizer for recurrent target: {e}[/yellow]"
                         )
 
-                elif target_value is None or target_value == "null":
+                elif target_value_scalar is None or target_value_scalar == "null":
                     console.print(
                         f"    Saving tokenizer from {metadata['base_model_names'][0]}..."
                     )
@@ -304,8 +308,8 @@ def main(args):
                     tokenizer.save_pretrained(savename)
                     console.print("    [green]Tokenizer saved.[/green]")
                 else:
-                    console.print(f"    Saving tokenizer from {target_value}...")
-                    tokenizer = load_tokenizer(target_value)
+                    console.print(f"    Saving tokenizer from {target_value_scalar}...")
+                    tokenizer = load_tokenizer(target_value_scalar)
                     tokenizer.save_pretrained(savename)
                     console.print("    [green]Tokenizer saved.[/green]")
             except Exception as e:

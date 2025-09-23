@@ -83,6 +83,45 @@ def GitReBasin(v1, v2s, preprocess_velocity=None, **kwargs):
     return v1, v2s
 
 
+def _linear_interp_torch(x: torch.Tensor, xp: torch.Tensor, fp: torch.Tensor) -> torch.Tensor:
+    """1D linear interpolation implemented in PyTorch.
+
+    Args:
+        x:  Values to interpolate (any shape, will be flattened internally).
+        xp: 1D sorted x-coordinates of the data points.
+        fp: 1D values at xp.
+
+    Returns:
+        Interpolated values with the same shape as x.
+    """
+    # Ensure 1D inputs for xp/fp and flatten x
+    xp = xp.flatten()
+    fp = fp.flatten()
+    orig_shape = x.shape
+    x = x.flatten()
+
+    # Clamp x to the interpolation domain
+    x_min = float(xp[0].item())
+    x_max = float(xp[-1].item())
+    x = x.clamp(min=x_min, max=x_max)
+
+    # Find indices such that xp[idx-1] <= x < xp[idx]
+    idx = torch.searchsorted(xp, x, right=False)
+    # Clamp indices to valid range [1, len(xp)-1]
+    idx = idx.clamp(min=1, max=max(1, xp.numel() - 1))
+
+    x0 = xp[idx - 1]
+    x1 = xp[idx]
+    y0 = fp[idx - 1]
+    y1 = fp[idx]
+
+    denom = (x1 - x0)
+    denom = torch.where(denom == 0, torch.full_like(denom, 1e-12), denom)
+    w = (x - x0) / denom
+    y = y0 + w * (y1 - y0)
+    return y.reshape(orig_shape)
+
+
 def QuantileMatch(proc_func, v1, v2s, velocity, *, num_quantiles=100, **kwargs):
     """
     Applies quantile matching to align the distribution of v2s to v1.
@@ -149,10 +188,16 @@ def QuantileMatch(proc_func, v1, v2s, velocity, *, num_quantiles=100, **kwargs):
     v2_sorted, v2_indices = torch.sort(v2_combined)
     v1_sorted, _ = torch.sort(v1)
 
-    interp_values = torch.interp(
-        processed,
-        v2_sorted,
-        torch.cat([v1_sorted, v1_sorted[[-1]]]),  # v1 quantiles mapping to v1 value
-    ).reshape(v1.shape)
+    # Interpolate processed values from v2 domain to v1 domain using a torch-based implementation
+    xp = v2_sorted
+    fp = torch.cat([v1_sorted, v1_sorted[[-1]]])  # match original boundary behavior
 
-    return interp_values.to(device)
+    # If xp and fp have different lengths due to concatenation logic, ensure xp matches fp length
+    # Insert a duplicate last point into xp to align lengths for boundary handling
+    if fp.numel() == xp.numel() + 1:
+        xp = torch.cat([xp, xp[[-1]]])
+
+    interp_values = _linear_interp_torch(processed, xp, fp)
+
+    # Restore original shape to match v1 for downstream operations
+    return interp_values.reshape(v1.shape).to(device)

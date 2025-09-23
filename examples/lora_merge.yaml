@@ -1,0 +1,49 @@
+models:
+  # === Recipe A: EMA smoothing over last 5 ===
+  - name: "ema_last5_step1"
+    left: ["e:/Ninja-merger/models/LoRA/shironecotte/shironecotte_v5-000026.safetensors"]
+    right: ["e:/Ninja-merger/models/LoRA/shironecotte/shironecotte_v5-000027.safetensors"]
+    target: null
+    operation: "mix"
+    velocity: 0.25
+    normalization: "quantile_match"
+    unmatch_size_layer_op: "skip"
+
+  - name: "ema_last5_step2"
+    left: "recurrent"
+    right: ["e:/Ninja-merger/models/LoRA/shironecotte/shironecotte_v5-000028.safetensors"]
+    target: "recurrent"
+    operation: "mix"
+    velocity: 0.2
+    normalization: "quantile_match"
+    unmatch_size_layer_op: "skip"
+
+  - name: "ema_last5_step3"
+    left: "recurrent"
+    right: ["e:/Ninja-merger/models/LoRA/shironecotte/shironecotte_v5-000029.safetensors"]
+    target: "recurrent"
+    operation: "mix"
+    velocity: 0.18
+    normalization: "quantile_match"
+    unmatch_size_layer_op: "skip"
+
+  - name: "ema_last5_step4"
+    left: "recurrent"
+    right: ["e:/Ninja-merger/models/LoRA/shironecotte/shironecotte_v5-000030.safetensors"]
+    target: "recurrent"
+    operation: "mix"
+    velocity: 0.15
+    normalization: "quantile_match"
+    unmatch_size_layer_op: "skip"
+
+  # === Recipe B: Trend-sharpen boost from earlier ===
+  - name: "momentum_boost_from_24"
+    left: ["e:/Ninja-merger/models/LoRA/shironecotte/shironecotte_v5-000030.safetensors"]
+    right: ["e:/Ninja-merger/models/LoRA/shironecotte/shironecotte_v5-000024.safetensors"]
+    target: null
+    operation: "sub"
+    velocity: 1.0
+    post_operation: "add"
+    post_velocity: 0.35
+    normalization: "match_std_mean"
+    unmatch_size_layer_op: "skip"
