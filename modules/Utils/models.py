@@ -7,10 +7,14 @@ from torch import nn
 
 
 class DummyModel(nn.Module):
-    def __init__(self, state_dict):
+    def __init__(self, state_dict, models=None, config_dict=None):
         super().__init__()
         self.state_dict_data = state_dict
-        self._config = DummyConfig()  # DummyConfig のインスタンスを生成
+        if config_dict:
+            self._config = DummyConfig(config_dict=config_dict)
+        else:
+            configs = [m.config for m in models] if models else []
+            self._config = DummyConfig(configs=configs)
 
     def state_dict(self):
         return self.state_dict_data
@@ -21,11 +25,38 @@ class DummyModel(nn.Module):
 
 
 class DummyConfig:
-    def __init__(self):
-        self._name_or_path = "dummy_model"  # ダミーの名前を設定
-        self.vocab_size = 0  # ダミーの値 (必要に応じて適切な値を設定)
-        # 他にも必要な属性があれば、ここで初期化
+    def __init__(self, configs=None, config_dict=None):
+        if config_dict:
+            for key, value in config_dict.items():
+                setattr(self, key, value)
+        elif configs:
+            # 最初の config をベースに共通の属性をコピー
+            base_config = configs[0]
+            for key, value in base_config.__dict__.items():
+                # RVC固有のメタデータは後で特別扱いするため、ここではスキップ
+                if key not in ["info", "version", "sr", "f0", "name"]:
+                    setattr(self, key, value)
 
+            # マージされたことを示すために名前を変更
+            self._name_or_path = "merged_model"
+            # アーキテクチャ情報も更新
+            self.architectures = ["DummyModel"]
+
+            # RVCモデルのメタデータを全モデルから集約
+            self.info = [getattr(c, "info", "N/A") for c in configs]
+            self.version = [getattr(c, "version", "N/A") for c in configs]
+            self.sr = [getattr(c, "sr", "N/A") for c in configs]
+            self.f0 = [getattr(c, "f0", False) for c in configs]
+            self.name = [getattr(c, "name", "N/A") for c in configs]
+
+        else:
+            self._name_or_path = "dummy_model"
+            self.vocab_size = 0
+            self.model_type = "dummy"
+            self.architectures = ["DummyModel"]
+
+    def to_dict(self):
+        return self.__dict__
 
 def merge_lora(model, lora_name, device):
     if lora_name is not None:
@@ -140,7 +171,7 @@ def prepare_model_metadata(model_dict):
     return metadata
 
 
-def load_and_prepare_models(model_dict, merge_models_device, torch_dtype):
+def load_and_prepare_models(model_dict, merge_models_device, torch_dtype, recurrent_model=None):
     """
     モデルをロードし、マージのための準備を行う。
 
@@ -148,6 +179,7 @@ def load_and_prepare_models(model_dict, merge_models_device, torch_dtype):
         model_dict (dict): モデルの設定 (config.yaml から読み込まれたもの)。
         merge_models_device (str): モデルをロードするデバイス。
         torch_dtype (torch.dtype): モデルのデータ型。
+        recurrent_model (torch.nn.Module, optional): 前のマージ結果のモデル. Defaults to None.
 
     Returns:
         tuple: (base_models, sub_models, velocity, post_velocity) のタプル。
@@ -162,7 +194,10 @@ def load_and_prepare_models(model_dict, merge_models_device, torch_dtype):
 
     base_models = []
     for model_name in model_dict["left"]:
-        if model_name != "recurrent":
+        if model_name.startswith("recurrent"):
+            if recurrent_model is not None:
+                base_models.append(recurrent_model)
+        else:
             model = load_model(model_name, merge_models_device, torch_dtype)
             model = merge_lora(model, None, merge_models_device)
             model_config = model_dict.get("model_config", {}).get(model_name, {})
@@ -171,7 +206,10 @@ def load_and_prepare_models(model_dict, merge_models_device, torch_dtype):
 
     sub_models = []
     for model_name in model_dict["right"]:
-        if model_name != "recurrent":
+        if model_name.startswith("recurrent"):
+            if recurrent_model is not None:
+                sub_models.append(recurrent_model)
+        else:
             model = load_model(model_name, merge_models_device, torch_dtype)
             model = merge_lora(model, None, merge_models_device)
             model_config = model_dict.get("model_config", {}).get(model_name, {})
@@ -180,9 +218,12 @@ def load_and_prepare_models(model_dict, merge_models_device, torch_dtype):
 
     velocities_config = model_dict.get("velocities", None)
     if velocities_config:
-        velocity = prepare_velocities(velocities_config, base_models[0].state_dict())
+        if base_models:
+            velocity = prepare_velocities(velocities_config, base_models[0].state_dict())
+        else:
+            velocity = None
     else:
-        velocity = model_dict["velocity"]
+        velocity = model_dict.get("velocity")
 
     post_velocities_config = model_dict.get("post_velocities", None)
     if post_velocities_config:

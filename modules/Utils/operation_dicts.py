@@ -56,7 +56,7 @@ OPERATION_DICT = {
 
 # --- Preprocessing Dictionaries ---
 PREPROCESS_DICT = {
-    "none": lambda x, y, **kwargs: (x, y),  # Passthrough
+    "none": lambda x, **kwargs: x,  # Passthrough
     "pcd": GitReBasin,  # process_calc から
 }
 

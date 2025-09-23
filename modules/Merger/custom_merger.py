@@ -14,9 +14,7 @@ class CustomMerger(Merger):
         self.console.rule("[bold blue]Starting Custom Model Merge Process[/bold blue]")
         self._filter_layers()
 
-        for k in torch.utils.data.DataLoader(
-            list(self.target_state_dict.keys()), batch_size=1
-        ):
+        for k in torch.utils.data.DataLoader(list(self.target_state_dict.keys()), batch_size=1):
             k = k[0]  # バッチ解除
             if k not in self.included_layers:
                 continue
@@ -38,7 +36,7 @@ class CustomMerger(Merger):
                 self.unmatch_size_layer_op,
                 self.console,
             )
-            self._log_operation_details()
+            self._log_operation_details(k)
 
             if self.operation == "widen":
                 self.console.print(
@@ -63,9 +61,7 @@ class CustomMerger(Merger):
                     self.console.print(f"[red]Error during WIDEN operation: {e}[/red]")
                     raise
             else:
-                self.console.print(
-                    f"[red] Unexpected operation: {self.operation} [/red]"
-                )
+                self.console.print(f"[red] Unexpected operation: {self.operation} [/red]")
                 raise ValueError(f"Unexpected operation: {self.operation}")
 
         self._print_summary()

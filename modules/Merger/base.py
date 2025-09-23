@@ -1,6 +1,6 @@
 # Merger/base.py
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Tuple, Union
 
 import torch
 from rich.console import Console
@@ -16,7 +16,41 @@ from ..Utils.utility import to_complex_tensor
 
 
 class Merger(ABC):
-    """Merger の抽象基底クラス。"""
+    """Abstract base class for all model mergers.
+
+    This class defines the common interface and shared functionalities for different
+    merging strategies. Subclasses must implement the `merge` method.
+
+    Attributes:
+        skip_layernorm (bool): If True, layernorm layers are skipped during merge.
+        target_model (torch.nn.Module): The model to which the merge results are applied.
+            If None, the first base model is used as the target.
+        base_models (List[torch.nn.Module]): A list of models to be used as the base for the merge.
+        sub_models (List[torch.nn.Module]): A list of models to be subtracted or otherwise
+            combined with the base models.
+        velocity (Union[float, complex, torch.Tensor, Dict]): The primary coefficient
+            for the merge operation. Can be a single value or a per-layer dictionary.
+        post_velocity (Union[float, complex, torch.Tensor, Dict]): The coefficient for the
+            post-merge operation, applied after the main merge.
+        skip_layers (List[str]): A list of layer names to explicitly skip.
+        operation (str): The primary merge operation to perform (e.g., 'add', 'sub').
+        post_operation (str): The operation to perform after the primary merge.
+        preprocess (str): The preprocessing to apply to tensors before the merge.
+        post_preprocess (str): The preprocessing to apply after the merge.
+        normalization (str): The normalization method to apply.
+        include_layers (List[str]): Specifications for layers to include in the merge.
+        exclude_layers (List[str]): Specifications for layers to exclude from the merge.
+        drop_layers (List[str]): Specifications for layers to drop from the model.
+        unmatch_size_layer_op (str): How to handle layers with mismatched sizes.
+        is_llava_next (bool): Special handling for Llava-NeXT models.
+        force_merge_single (bool): Forces merging even with a single model.
+        v2s_empty_default (str): Default behavior for empty velocity-to-slice.
+        v2s_single_default (str): Default behavior for single velocity-to-slice.
+        model_dict (Dict[str, Any]): The original configuration dictionary for the merge.
+        console (Console): Rich console for pretty printing.
+        target (torch.nn.Module): The effective target model for the merge.
+        target_state_dict (Dict[str, torch.Tensor]): The state dictionary of the target model.
+    """
 
     def __init__(
         self,
@@ -24,12 +58,8 @@ class Merger(ABC):
         target_model: torch.nn.Module,
         base_models: List[torch.nn.Module],
         sub_models: List[torch.nn.Module],
-        velocity: Union[
-            float, complex, torch.Tensor, Dict[str, Union[float, complex, torch.Tensor]]
-        ],
-        post_velocity: Union[
-            float, complex, torch.Tensor, Dict[str, Union[float, complex, torch.Tensor]]
-        ],
+        velocity: Union[float, complex, torch.Tensor, Dict[str, Union[float, complex, torch.Tensor]]],
+        post_velocity: Union[float, complex, torch.Tensor, Dict[str, Union[float, complex, torch.Tensor]]],
         skip_layers: List[str],
         operation: str,
         post_operation: str,
@@ -90,37 +120,79 @@ class Merger(ABC):
 
     @abstractmethod
     def merge(self) -> torch.nn.Module:
-        """モデルをマージする抽象メソッド。具象クラスで実装が必要。"""
+        """Performs the model merging.
+
+        This is an abstract method that must be implemented by all concrete
+        merger subclasses.
+
+        Returns:
+            torch.nn.Module: The merged model.
+        """
         pass
 
     def _check_layer_compatibility(self, k: str) -> bool:
-        """レイヤーの互換性をチェックするヘルパー関数。"""
+        """Checks if a layer is compatible for merging across all models.
+
+        A layer is considered incompatible if its key is missing or its tensor
+        shape does not match the target model's corresponding layer. This check
+        is only performed if `unmatch_size_layer_op` is set to 'skip'.
+
+        Args:
+            k (str): The name of the layer to check.
+
+        Returns:
+            bool: True if the layer is compatible, False otherwise.
+        """
         v = self.target_state_dict[k]
 
         if self.unmatch_size_layer_op == "skip":
             for b in self.base_models:
                 if k not in b.state_dict() or v.shape != b.state_dict()[k].shape:
-                    self.console.print(
-                        f"[yellow]  Skipping layer {k} due to size mismatch or missing key in base model.[/yellow]"
-                    )
+                    self.console.print(f"[yellow]  Skipping layer {k} due to size mismatch or missing key in base model.[/yellow]")
                     return False
             for s in self.sub_models:
                 if k not in s.state_dict() or v.shape != s.state_dict()[k].shape:
-                    self.console.print(
-                        f"[yellow]  Skipping layer {k} due to size mismatch or missing key in sub model.[/yellow]"
-                    )
+                    self.console.print(f"[yellow]  Skipping layer {k} due to size mismatch or missing key in sub model.[/yellow]")
                     return False
         return True
 
-    def _display_tensor_info(self, title: str, tensor: torch.Tensor, prefix: str = ""):
-        """テンソルの情報を表示するヘルパー関数。"""
-        if tensor is not None:
-            self.console.print(
-                f"  [{prefix}]{title} - First 5 elements: {tensor.flatten()[:5]}[/{prefix}]"
-            )
+    def _prepare_tensor_slices(self, k: str) -> Tuple[torch.Tensor, List[torch.Tensor], List[torch.Tensor], List[torch.Tensor]]:
+        """Prepares tensor slices from the target, base, and sub models for a given layer.
 
-    def _log_operation_details(self, k):
-        """操作の詳細をログに出力する関数。"""
+        Args:
+            k (str): The name of the layer.
+
+        Returns:
+            A tuple containing:
+            - The tensor slice from the target model.
+            - A list of tensor slices from the base models.
+            - A list of tensor slices from the sub models.
+            - A list of tensor slices from the velocity-to-slice models (if any).
+        """
+        v_slice = self.target_state_dict[k]
+        base_slices = [b.state_dict()[k] for b in self.base_models]
+        sub_slices = [s.state_dict()[k] for s in self.sub_models]
+        v2s_slices = []  # Placeholder for now
+
+        return v_slice, base_slices, sub_slices, v2s_slices
+
+    def _display_tensor_info(self, title: str, tensor: torch.Tensor, prefix: str = ""):
+        """Displays debugging information for a given tensor.
+
+        Args:
+            title (str): The title for the information display.
+            tensor (torch.Tensor): The tensor to display information about.
+            prefix (str): A prefix for the console output style.
+        """
+        if tensor is not None:
+            self.console.print(f"  [{prefix}]{title} - First 5 elements: {tensor.flatten()[:5]}[/{prefix}]")
+
+    def _log_operation_details(self, k: str):
+        """Logs the detailed parameters of the merge operation for a specific layer.
+
+        Args:
+            k (str): The name of the layer for which to log details.
+        """
         # 修正: to_complex_tensor を使用
         if isinstance(self.velocity, dict):
             velocity_display = to_complex_tensor(
@@ -149,19 +221,12 @@ class Merger(ABC):
         if isinstance(velocity_display, torch.Tensor) and velocity_display.is_complex():
             velocity_display = f"{velocity_display.real.item():.4f}+{velocity_display.imag.item():.4f}j"
         elif isinstance(velocity_display, complex):
-            velocity_display = (
-                f"{velocity_display.real:.4f}+{velocity_display.imag:.4f}j"
-            )
+            velocity_display = f"{velocity_display.real:.4f}+{velocity_display.imag:.4f}j"
 
-        if (
-            isinstance(post_velocity_display, torch.Tensor)
-            and post_velocity_display.is_complex()
-        ):
+        if isinstance(post_velocity_display, torch.Tensor) and post_velocity_display.is_complex():
             post_velocity_display = f"{post_velocity_display.real.item():.4f}+{post_velocity_display.imag.item():.4f}j"
         elif isinstance(post_velocity_display, complex):
-            post_velocity_display = (
-                f"{post_velocity_display.real:.4f}+{post_velocity_display.imag:.4f}j"
-            )
+            post_velocity_display = f"{post_velocity_display.real:.4f}+{post_velocity_display.imag:.4f}j"
 
         self.console.print(
             Panel(
@@ -178,7 +243,11 @@ class Merger(ABC):
         )
 
     def _filter_layers(self):
-        """レイヤーのフィルタリングを行う。"""
+        """Filters layers based on include, exclude, and drop specifications.
+
+        Populates the `self.included_layers`, `self.excluded_layers`, and
+        `self.dropped_layers` lists based on the user-provided configuration.
+        """
         for k in self.target_state_dict.keys():
             target_k = k
             if self.is_llava_next:
@@ -207,10 +276,8 @@ class Merger(ABC):
             self.console.print(f"  [green]Including layer: {k}[/green]")
 
     def _print_summary(self):
-        """マージ結果のサマリーを表示する。"""
-        table = Table(
-            title="Layer Summary", show_header=True, header_style="bold magenta"
-        )
+        """Prints a summary table of which layers were included, excluded, or dropped."""
+        table = Table(title="Layer Summary", show_header=True, header_style="bold magenta")
         table.add_column("Layer Name", style="dim", width=60)
         table.add_column("Status", justify="right")
 

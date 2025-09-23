@@ -25,6 +25,7 @@ from modules.Utils.models import (
     load_and_prepare_models,
     prepare_model_metadata,
 )
+from modules.Utils.models import DummyModel
 from modules.Utils.utility import define_savename, scale_tensor_inplace
 
 console = Console()
@@ -183,7 +184,7 @@ def main(args):
         # 2. モデルのロードと準備
         try:
             base_models, sub_models, velocity, post_velocity = load_and_prepare_models(
-                model_dict, merge_models_device, torch_dtype
+                model_dict, merge_models_device, torch_dtype, target_model
             )
         except Exception as e:
             console.print(f"[red]Error loading base/sub models: {e}[/red]")
@@ -281,31 +282,34 @@ def main(args):
         console.print("  [green]Saving model...[/green]")
 
         try:
-            if target_value == "recurrent":
-                console.print("    Saving tokenizer from previous target model...")
-                try:
-                    tokenizer = AutoTokenizer.from_pretrained(
-                        target_model.config.name_or_path, trust_remote_code=True
+            try:
+                if target_value == "recurrent":
+                    console.print("    Saving tokenizer from previous target model...")
+                    try:
+                        tokenizer = AutoTokenizer.from_pretrained(
+                            target_model.config.name_or_path, trust_remote_code=True
+                        )
+                        tokenizer.save_pretrained(savename)
+                        console.print("    [green]Tokenizer saved.[/green]")
+                    except Exception as e:
+                        console.print(
+                            f"[yellow]Warning: Could not save tokenizer for recurrent target: {e}[/yellow]"
+                        )
+
+                elif target_value is None or target_value == "null":
+                    console.print(
+                        f"    Saving tokenizer from {metadata['base_model_names'][0]}..."
                     )
+                    tokenizer = load_tokenizer(metadata["base_model_names"][0])
                     tokenizer.save_pretrained(savename)
                     console.print("    [green]Tokenizer saved.[/green]")
-                except Exception as e:
-                    console.print(
-                        f"[yellow]Warning: Could not save tokenizer for recurrent target: {e}[/yellow]"
-                    )
-
-            elif target_value is None or target_value == "null":
-                console.print(
-                    f"    Saving tokenizer from {metadata['base_model_names'][0]}..."
-                )
-                tokenizer = load_tokenizer(metadata["base_model_names"][0])
-                tokenizer.save_pretrained(savename)
-                console.print("    [green]Tokenizer saved.[/green]")
-            else:
-                console.print(f"    Saving tokenizer from {target_value}...")
-                tokenizer = load_tokenizer(target_value)
-                tokenizer.save_pretrained(savename)
-                console.print("    [green]Tokenizer saved.[/green]")
+                else:
+                    console.print(f"    Saving tokenizer from {target_value}...")
+                    tokenizer = load_tokenizer(target_value)
+                    tokenizer.save_pretrained(savename)
+                    console.print("    [green]Tokenizer saved.[/green]")
+            except Exception as e:
+                console.print(f"[yellow]Warning: Failed to save tokenizer: {e}[/yellow]")
 
             if use_scaling:
                 console.print(
@@ -337,7 +341,14 @@ def main(args):
                                 base_models[0].state_dict()[key] = value.bfloat16()
 
             if target_model is None:
-                base_models[0].save_pretrained(savename)  # base_models[0] を保存
+                base_models[0].save_pretrained(savename)
+            elif isinstance(target_model, DummyModel):
+                console.print(f"    Saving model and config as a .pth file to {savename}.pth")
+                save_data = {
+                    "config": target_model.config.to_dict(),
+                    "model": target_model.state_dict(),
+                }
+                torch.save(save_data, f"{savename}.pth")
             else:
                 target_model.save_pretrained(savename)
             console.print("    [green]Model saved.[/green]")

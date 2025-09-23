@@ -4,6 +4,7 @@ from ..Merger.base import Merger
 from ..Proc.normalization import normalize_tensor
 from ..Proc.post_processing import post_process_tensor
 from ..Proc.pre_processing import preprocess_tensor
+from ..Utils.models import DummyConfig, DummyModel
 from ..Utils.operation_dicts import OPERATION_DICT
 
 
@@ -30,11 +31,12 @@ class BasicMerger(Merger):
             try:
                 base_processed_values = []
 
-                velocity = (
-                    self.velocity[k]
-                    if isinstance(self.velocity, dict)
-                    else self.velocity
-                )
+                if self.velocity is None:
+                    velocity = 1.0
+                elif isinstance(self.velocity, dict):
+                    velocity = self.velocity.get(k, 1.0)
+                else:
+                    velocity = self.velocity
 
                 for b_idx, (b_slice, b) in enumerate(
                     zip(base_slices, self.base_models)
@@ -90,4 +92,8 @@ class BasicMerger(Merger):
                 raise
 
         self._print_summary()
+        if isinstance(self.target, DummyModel):
+            all_models = self.base_models + self.sub_models
+            configs = [m.config for m in all_models if hasattr(m, "config")]
+            self.target._config = DummyConfig(configs=configs)
         return self.target

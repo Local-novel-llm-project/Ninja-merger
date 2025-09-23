@@ -108,7 +108,7 @@ def define_savename(base, sub, target, out_dir, index, model_dict=None):
     elif target is None or target == "null":
         dir_path = os.path.join(out_dir, "vector")
     else:
-        target_name = os.path.basename(target)
+        target_name = os.path.basename(target[0] if isinstance(target, list) else target)
         dir_path = os.path.join(out_dir, target_name)
 
     os.makedirs(dir_path, exist_ok=True)  # ディレクトリが存在しない場合は作成
@@ -138,7 +138,7 @@ def define_savename(base, sub, target, out_dir, index, model_dict=None):
     elif target is None or target == "null":
         save_name = os.path.join(dir_path, basename + ".safetensors")
     else:
-        target_name = os.path.basename(target)
+        target_name = os.path.basename(target[0] if isinstance(target, list) else target)
         save_name = os.path.join(dir_path, basename + ".safetensors")
 
     # 8. レシピを保存 (モデル設定を YAML 形式で保存)

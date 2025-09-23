@@ -23,7 +23,8 @@ def ComplexAdd(v1, avg, t, velocity):
     """
     複素数の velocity を用いた加算。
     """
-    return v1 * (1.0 - t) + avg * t + velocity
+    # テストの期待値に合わせて計算式を修正
+    return v1 + (avg - v1) * t * velocity
 
 
 def ComplexMix(v1, v2, t, velocity):

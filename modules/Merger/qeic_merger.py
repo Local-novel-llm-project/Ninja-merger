@@ -10,9 +10,30 @@ from ..Utils.utility import prepare_tensor_slices
 
 
 class QeicMerger(Merger):
-    """QEIC 関連の演算を行う Merger クラス。"""
+    """Performs merging operations inspired by Quantum Entanglement.
+
+    This merger uses correlation matrices between layers of base and sub models
+    to calculate a calibrated merge, inspired by concepts from quantum entanglement.
+    It is designed for more complex and nuanced model combinations.
+
+    The process involves:
+    1. Filtering layers based on standard inclusion/exclusion criteria.
+    2. For each targeted layer, calculating correlation matrices between the
+       base and sub models.
+    3. Using these matrices, along with other parameters, to perform the
+       merge operation defined in the `OPERATION_DICT`.
+    """
 
     def merge(self) -> torch.nn.Module:
+        """Executes the QEIC merge process.
+
+        Iterates through each layer of the target model, checks for compatibility
+        and inclusion criteria, calculates correlation matrices, and then applies
+        the specified QEIC merge operation.
+
+        Returns:
+            torch.nn.Module: The model with merged layers.
+        """
         self.console.rule("[bold blue]Starting QEIC Model Merge Process[/bold blue]")
         self._filter_layers()
 

@@ -129,10 +129,17 @@ def get_skip_layers(
 
             # サイズが異なる場合は警告を出すだけ
             if target_model is not None:
-                if (
-                    target_model.state_dict()[target_key].size()
-                    != base_state_dicts[0][target_key].size()
-                ):
+                target_tensor = target_model.state_dict().get(target_key)
+                base_tensor = base_state_dicts[0].get(target_key)
+                if hasattr(target_tensor, "size") and hasattr(base_tensor, "size"):
+                    if target_tensor.size() != base_tensor.size():
+                        print(
+                            f"[cyan] Base key size mismatch: {target_key}, will use common range[/cyan]"
+                        )
+                else:
+                    print(
+                        f"[yellow]Warning: Invalid tensor found for key '{target_key}' when comparing target and base. Skipping size check.[/yellow]"
+                    )
                     print(
                         f"[cyan] Base key size mismatch: {target_key}, will use common range[/cyan]"
                     )
@@ -140,19 +147,33 @@ def get_skip_layers(
 
             for sub_state_dict in sub_state_dicts:
                 if target_model is None:
-                    if (
-                        base_state_dicts[0][target_key].size()
-                        != sub_state_dict[target_key].size()
-                    ):
+                    base_tensor = base_state_dicts[0].get(target_key)
+                    sub_tensor = sub_state_dict.get(target_key)
+                    if hasattr(base_tensor, "size") and hasattr(sub_tensor, "size"):
+                        if base_tensor.size() != sub_tensor.size():
+                            print(
+                                f"[cyan] Sub key size mismatch: {target_key}, will use common range[/cyan]"
+                            )
+                    else:
+                        print(
+                            f"[yellow]Warning: Invalid tensor found for key '{target_key}' when comparing base and sub. Skipping size check.[/yellow]"
+                        )
                         print(
                             f"[cyan] Sub key size mismatch: {target_key}, will use common range[/cyan]"
                         )
                         # skip_layers には追加しない
                 else:
-                    if (
-                        target_model.state_dict()[target_key].size()
-                        != sub_state_dict[target_key].size()
-                    ):
+                    target_tensor = target_model.state_dict().get(target_key)
+                    sub_tensor = sub_state_dict.get(target_key)
+                    if hasattr(target_tensor, "size") and hasattr(sub_tensor, "size"):
+                        if target_tensor.size() != sub_tensor.size():
+                            print(
+                                f"[cyan] Sub key size mismatch: {target_key}, will use common range[/cyan]"
+                            )
+                    else:
+                        print(
+                            f"[yellow]Warning: Invalid tensor found for key '{target_key}' when comparing target and sub. Skipping size check.[/yellow]"
+                        )
                         print(
                             f"[cyan] Sub key size mismatch: {target_key}, will use common range[/cyan]"
                         )
@@ -184,10 +205,21 @@ def get_skip_layers(
                 continue
             # サイズチェック
             if target_model is not None:
-                if (
-                    target_model.state_dict()[target_key].size()
-                    != base_state_dicts[0][target_key].size()
-                ):
+                target_tensor = target_model.state_dict().get(target_key)
+                base_tensor = base_state_dicts[0].get(target_key)
+                if hasattr(target_tensor, "size") and hasattr(base_tensor, "size"):
+                    if target_tensor.size() != base_tensor.size():
+                        print(
+                            f"[yellow] Base key size mismatch: {target_key}, skip...[/yellow]"
+                        )
+                        skip_layers.append(target_key)
+                        continue
+                else:
+                    print(
+                        f"[yellow]Warning: Invalid tensor for key '{target_key}' in target/base, skip...[/yellow]"
+                    )
+                    skip_layers.append(target_key)
+                    continue
                     print(
                         f"[yellow] Base key size mismatch: {target_key}, skip...[/yellow]"
                     )
@@ -195,20 +227,42 @@ def get_skip_layers(
                     continue
             for sub_state_dict in sub_state_dicts:
                 if target_model is None:
-                    if (
-                        base_state_dicts[0][target_key].size()
-                        != sub_state_dict[target_key].size()
-                    ):
+                    base_tensor = base_state_dicts[0].get(target_key)
+                    sub_tensor = sub_state_dict.get(target_key)
+                    if hasattr(base_tensor, "size") and hasattr(sub_tensor, "size"):
+                        if base_tensor.size() != sub_tensor.size():
+                            print(
+                                f"[yellow] Sub key size mismatch: {target_key}, skip...[/yellow]"
+                            )
+                            skip_layers.append(target_key)
+                            break
+                    else:
+                        print(
+                            f"[yellow]Warning: Invalid tensor for key '{target_key}' in base/sub, skip...[/yellow]"
+                        )
+                        skip_layers.append(target_key)
+                        break
                         print(
                             f"[yellow] Sub key size mismatch: {target_key}, skip...[/yellow]"
                         )
                         skip_layers.append(target_key)
                         break
                 else:
-                    if (
-                        target_model.state_dict()[target_key].size()
-                        != sub_state_dict[target_key].size()
-                    ):
+                    target_tensor = target_model.state_dict().get(target_key)
+                    sub_tensor = sub_state_dict.get(target_key)
+                    if hasattr(target_tensor, "size") and hasattr(sub_tensor, "size"):
+                        if target_tensor.size() != sub_tensor.size():
+                            print(
+                                f"[yellow] Sub key size mismatch: {target_key}, skip...[/yellow]"
+                            )
+                            skip_layers.append(target_key)
+                            break
+                    else:
+                        print(
+                            f"[yellow]Warning: Invalid tensor for key '{target_key}' in target/sub, skip...[/yellow]"
+                        )
+                        skip_layers.append(target_key)
+                        break
                         print(
                             f"[yellow] Sub key size mismatch: {target_key}, skip...[/yellow]"
                         )

@@ -59,9 +59,25 @@ class ComplexMerger(Merger):
                 )
                 try:
                     avg = sum(sub_slices) / len(sub_slices)
+
+                    # velocity をテンソルに変換
+                    if not isinstance(velocity, torch.Tensor):
+                        device = (
+                            v_slice.device
+                            if hasattr(v_slice, "device")
+                            else torch.device("cpu")
+                        )
+                        if isinstance(velocity, complex):
+                            velocity = torch.complex(
+                                torch.tensor(velocity.real, device=device),
+                                torch.tensor(velocity.imag, device=device),
+                            )
+                        else:
+                            velocity = torch.tensor(float(velocity), device=device)
+
                     t = torch.tensor(0.1).to(
-                        self.velocity.device
-                    )  # これ、velocity が複素数の場合は？
+                        velocity.device
+                    )  # 修正: self.velocity -> velocity
                     before_tensor = v_slice
 
                     self._display_tensor_info(

@@ -37,7 +37,7 @@ models:
       "model.embed_tokens.": 0.1  # embedding 層
       "model.layers.0.": 0.2     # 最初の layer
       "model.layers.1.": 0.3
-      "model.layers.(\d+).":    # 正規表現で layer を指定 (キャプチャグループを使用可能)
+      "model.layers.(\\d+).":    # 正規表現で layer を指定 (キャプチャグループを使用可能)
         type: regex
         value: "0.4 + 0.01 * int(match.group(1))"  # layer 番号に応じて増加 (例: 0.41, 0.42, 0.43, ...)
       "model.layers.(1[0-9]|2[0-3]).": # 正規表現
@@ -54,7 +54,7 @@ models:
       "model.embed_tokens.": 1.5
       "model.layers.0.": 1.2
       "model.layers.1.": 1.0
-      "model.layers.(\d+).":
+      "model.layers.(\\d+).":
         type: regex
         value: "1.0 - 0.005 * int(match.group(1))"
       "model.norm.": 0.9
@@ -108,7 +108,7 @@ models:
               "old_prefix.": "new_prefix."  # "old_prefix.xxx" -> "new_prefix.xxx"
               "another_old.": "another_new."
           - type: regex  # 正規表現による置換
-            regex: "^transformer\.(.*)"  # "transformer.xxx" -> "model.xxx"
+            regex: "^transformer\\.(.*)"  # "transformer.xxx" -> "model.xxx"
             replace: "model.\\1"  # キャプチャグループを使用
 
         # --- レイヤー挿入 ---

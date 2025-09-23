@@ -16,12 +16,23 @@ from modules.Utils.models import DummyModel
 def load_model(model_path, device, torch_dtype):
     print(f"load_model: model input: {model_path}")
 
+    if isinstance(model_path, list):
+        model_path = model_path[0]
+
     if model_path.endswith(".safetensors"):
         state_dict = load_file(model_path, device=device)
         model = DummyModel(state_dict)
     elif model_path.endswith(".pth") or model_path.endswith(".bin"):
-        state_dict = torch.load(model_path, map_location=device)
-        model = DummyModel(state_dict)
+        data = torch.load(model_path, map_location=device)
+        if isinstance(data, dict) and "state_dict" in data:
+            state_dict = data["state_dict"]
+            config_dict = data.get("config")
+            model = DummyModel(state_dict, config_dict=config_dict)
+        else:
+            state_dict = data
+            if "weight" in state_dict:
+                state_dict = state_dict["weight"]
+            model = DummyModel(state_dict)
     else:
         model = AutoModelForCausalLM.from_pretrained(
             model_path,
@@ -77,8 +88,13 @@ def load_config(config_path):
                 model_entry["model_config"][model_name].update(merged_config)
 
         # velocity の処理 (既存のコード)
+        if "velocities" in model_entry:
+            model_entry["velocity"] = model_entry.pop("velocities")
+
         velocity = model_entry.get("velocity")
-        if isinstance(velocity, dict) and "real" in velocity and "imag" in velocity:
+        if velocity is None:
+            model_entry["velocity"] = 1.0
+        elif isinstance(velocity, dict) and "real" in velocity and "imag" in velocity:
             model_entry["velocity"] = torch.complex(
                 torch.tensor(velocity["real"]), torch.tensor(velocity["imag"])
             )
@@ -86,6 +102,10 @@ def load_config(config_path):
         elif isinstance(velocity, (int, float)):
             # 修正: int, float の場合はそのままの値を使用
             model_entry["velocity"] = velocity
+
+        # post_velocity の処理
+        if "post_velocity" not in model_entry:
+            model_entry["post_velocity"] = 1.0
 
         # target が存在しない場合は、null を設定
         if "target" not in model_entry:

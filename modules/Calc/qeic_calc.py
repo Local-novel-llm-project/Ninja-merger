@@ -2,22 +2,32 @@ import torch
 
 
 def calculate_correlation_matrices(
-    base_model, sub_model, layers, corr_method="pearson", device="cpu"
-):
-    """
-    ベースモデルとサブモデルの指定されたレイヤーの活性化の相関行列を計算する。
+    base_model: torch.nn.Module,
+    sub_model: torch.nn.Module,
+    layers: list[str],
+    corr_method: str = "pearson",
+    device: str = "cpu",
+) -> tuple[list[torch.Tensor], list[torch.Tensor]]:
+    """Calculates correlation matrices of activations for specified layers.
+
+    This function computes the neuron-wise correlation matrices for a given
+    list of layers in both a base and a sub model. It does this by injecting
+    hooks, running a dummy forward pass to capture activations, and then
+    computing the correlation.
 
     Args:
-        base_model: ベースモデル (torch.nn.Module)。
-        sub_model: サブモデル (torch.nn.Module)。
-        layers: 相関を計算するレイヤー名のリスト。
-        corr_method: 相関の計算方法 ("pearson" または "spearman")。
-        device: 計算を行うデバイス ("cpu" または "cuda")。
+        base_model (torch.nn.Module): The base model.
+        sub_model (torch.nn.Module): The sub model.
+        layers (list[str]): A list of layer names to compute correlations for.
+        corr_method (str, optional): The correlation method, either 'pearson'
+            or 'spearman'. Defaults to "pearson".
+        device (str, optional): The device to run the forward pass on.
+            Defaults to "cpu".
 
     Returns:
-        base_corr_matrices: ベースモデルの各レイヤーの相関行列のリスト。
-        sub_corr_matrices: サブモデルの各レイヤーの相関行列のリスト。
-           (モデルがNoneの場合は空のリストを返す)
+        tuple[list[torch.Tensor], list[torch.Tensor]]: A tuple containing two
+            lists: the first for the base model's correlation matrices, and
+            the second for the sub model's.
     """
 
     def get_activations(model, layers, device):
@@ -108,17 +118,27 @@ def calculate_correlation_matrices(
     return base_corr_matrices, sub_corr_matrices
 
 
-def merge_correlation_matrices(base_corr_matrices, sub_corr_matrices, method="average"):
-    """
-    ベースモデルとサブモデルの相関行列をマージする。
+def merge_correlation_matrices(
+    base_corr_matrices: list[torch.Tensor],
+    sub_corr_matrices: list[torch.Tensor],
+    method: str = "average",
+) -> list[torch.Tensor]:
+    """Merges correlation matrices from base and sub models.
 
     Args:
-        base_corr_matrices: ベースモデルの相関行列のリスト。
-        sub_corr_matrices: サブモデルの相関行列のリスト。
-        method: マージ方法 ("average", "geometric_mean", "quantum_inspired")。
+        base_corr_matrices (list[torch.Tensor]): A list of correlation matrices
+            from the base model.
+        sub_corr_matrices (list[torch.Tensor]): A list of correlation matrices
+            from the sub model.
+        method (str, optional): The merging method. Can be 'average',
+            'geometric_mean', or 'quantum_inspired'. Defaults to "average".
 
     Returns:
-        merged_corr_matrices: マージされた相関行列のリスト。
+        list[torch.Tensor]: A list of the merged correlation matrices.
+
+    Raises:
+        ValueError: If the number of matrices in the base and sub lists differ,
+            or if an invalid merge method is provided.
     """
 
     merged_corr_matrices = []
@@ -142,28 +162,80 @@ def merge_correlation_matrices(base_corr_matrices, sub_corr_matrices, method="av
     return merged_corr_matrices
 
 
-def QeicAdd(v, base_state_dict, sub_state_dict, velocity, **kwargs):
-    """
-    QEICに基づく重み付け加算を行う。
+def QeicAdd(
+    v: torch.Tensor,
+    base_state_dict: torch.Tensor,
+    sub_state_dict: torch.Tensor,
+    velocity: float,
+    **kwargs,
+) -> torch.Tensor:
+    """Performs QEIC-based weighted addition.
+
+    This is a wrapper around `qeic_base` for the 'add' operation.
     """
     return qeic_base(v, base_state_dict, sub_state_dict, velocity, "add", **kwargs)
 
 
-def QeicMix(v, base_state_dict, sub_state_dict, velocity, **kwargs):
-    """
-    QEICに基づく重み付け混合を行う。
+def QeicMix(
+    v: torch.Tensor,
+    base_state_dict: torch.Tensor,
+    sub_state_dict: torch.Tensor,
+    velocity: float,
+    **kwargs,
+) -> torch.Tensor:
+    """Performs QEIC-based weighted mixing.
+
+    This is a wrapper around `qeic_base` for the 'mix' operation.
     """
     return qeic_base(v, base_state_dict, sub_state_dict, velocity, "mix", **kwargs)
 
 
-def QeicSub(v, base_state_dict, sub_state_dict, velocity, **kwargs):
-    """
-    QEICに基づく減算を行う（負の相関を考慮）。
+def QeicSub(
+    v: torch.Tensor,
+    base_state_dict: torch.Tensor,
+    sub_state_dict: torch.Tensor,
+    velocity: float,
+    **kwargs,
+) -> torch.Tensor:
+    """Performs QEIC-based subtraction, considering negative correlation.
+
+    This is a wrapper around `qeic_base` for the 'sub' operation.
     """
     return qeic_base(v, base_state_dict, sub_state_dict, velocity, "sub", **kwargs)
 
 
-def qeic_base(v, base_state_dict, sub_state_dict, velocity, mode, **kwargs):
+def qeic_base(
+    v: torch.Tensor,
+    base_state_dict: torch.Tensor,
+    sub_state_dict: torch.Tensor,
+    velocity: float,
+    mode: str,
+    **kwargs,
+) -> torch.Tensor:
+    """Core function for QEIC-based merging.
+
+    Calculates a merged weight tensor based on the correlation between neurons
+    in the base and sub models.
+
+    Args:
+        v (torch.Tensor): The original tensor from the target model.
+        base_state_dict (torch.Tensor): The corresponding tensor from the base model.
+        sub_state_dict (torch.Tensor): The corresponding tensor from the sub model.
+        velocity (float): The velocity parameter for mixing.
+        mode (str): The merge mode ('add', 'mix', or 'sub').
+        **kwargs: A dictionary of additional parameters, including:
+            - layers (list[str]): The layers being processed.
+            - corr_method (str): The correlation calculation method.
+            - merge_method (str): The method for merging correlation matrices.
+            - alpha_mode (str): The method for calculating the weighting factor alpha.
+            - beta_mode (str): The method for calculating the weighting factor for subtraction.
+            - sub_threshold (float): The threshold for negative correlation in 'sub' mode.
+            - base_corr_matrices (list[torch.Tensor]): Pre-calculated correlation matrices for the base model.
+            - sub_corr_matrices (list[torch.Tensor]): Pre-calculated correlation matrices for the sub model.
+
+    Returns:
+        torch.Tensor: The merged tensor.
+    """
     layers = kwargs.get("layers", [])
     corr_method = kwargs.get("corr_method", "pearson")
     merge_method = kwargs.get("merge_method", "average")
