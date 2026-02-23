@@ -33,14 +33,14 @@ def WidenMerge(
     if not sub_models:
         raise ValueError("sub_models cannot be empty.")
 
-    # base_model = base_models[0]  # 今回は、base_modelは複数与えられる可能性を考慮しない
-    w_base = target.state_dict()[key].to(
-        next(target.parameters()).device
-    )  # デバイス統一
+    # DummyModel を含むため、parameters() に依存せず対象重みのデバイスを基準にする。
+    base_weight = target.state_dict()[key]
+    target_device = base_weight.device
+    w_base = base_weight.to(target_device)
 
     # 有効なsub_modelのパラメータのみを取得
     w_subs = [
-        sub_model.state_dict()[key].to(next(target.parameters()).device)
+        sub_model.state_dict()[key].to(target_device)
         for sub_model in sub_models
         if key in sub_model.state_dict()
         and sub_model.state_dict()[key].shape == w_base.shape

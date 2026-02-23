@@ -47,6 +47,7 @@ OPERATION_DICT = {
     "std_sub": StdSub,
     "widen": WidenMerge,
     "complexadd": ComplexAdd,
+    "angle_merge": NormAngleMerge,
     "complex_angle_merge": ComplexAngleMerge,
     "complex_mix": ComplexMix,
     "qeic_add": QeicAdd,

@@ -22,10 +22,9 @@ def Mix(v, base_state_dict, sub_state_dict, velocity):
     return (base_state_dict * (1.0 - velocity) + sub_state_dict * velocity).to(v)
 
 
-def Avg(v, base_state_dict, sub_state_dict, base_weight, sub_weight, velocity):
-    return (base_state_dict * base_weight + sub_state_dict * sub_weight) / (
-        base_weight + sub_weight
-    )
+def Avg(v, base_state_dict, sub_state_dict, velocity):
+    # velocity は互換性維持のため受け取るが、avg 自体は単純平均を返す。
+    return ((base_state_dict + sub_state_dict) * 0.5).to(v)
 
 
 def Concatenation(v, base_state_dict, sub_state_dict, velocity):

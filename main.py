@@ -50,14 +50,20 @@ def main(args):
 
         # 1. メタデータの準備
         metadata = prepare_model_metadata(model_dict)
-
-        target_value = metadata["target_value"]  # model_dict.get("target")
-        # Normalize list targets like ["recurrent"] to a scalar for control flow
-        target_value_scalar = (
-            target_value[0]
-            if isinstance(target_value, list) and len(target_value) == 1
-            else target_value
+        current_use_scaling = (
+            metadata["use_scaling"]
+            if metadata["use_scaling"] is not None
+            else use_scaling
         )
+        effective_include_layers = (
+            include_layers if include_layers is not None else metadata["include_layers"]
+        )
+        effective_exclude_layers = (
+            exclude_layers if exclude_layers is not None else metadata["exclude_layers"]
+        )
+
+        # Normalize list targets like ["recurrent"] to a scalar for control flow
+        target_value_scalar = metadata["target_value_scalar"]
 
         if target_value_scalar == "recurrent":
             if target_model is None:
@@ -261,8 +267,8 @@ def main(args):
                 metadata["preprocess"],
                 metadata["post_preprocess"],
                 metadata["normalization"],
-                metadata["include_layers"],
-                metadata["exclude_layers"],
+                effective_include_layers,
+                effective_exclude_layers,
                 metadata["drop_layers"],
                 metadata["unmatch_size_layer_op"],
                 is_llava_next=metadata["is_llava_next"],
@@ -315,7 +321,7 @@ def main(args):
             except Exception as e:
                 console.print(f"[yellow]Warning: Failed to save tokenizer: {e}[/yellow]")
 
-            if use_scaling:
+            if current_use_scaling:
                 console.print(
                     "    Checking for small values in the merged model and scaling if necessary..."
                 )
@@ -329,20 +335,16 @@ def main(args):
                     state_dict = target_model.state_dict()
 
                 for key, value in state_dict.items():
-                    if value.dtype != torch.bfloat16:
-                        if torch.any(torch.abs(value) < threshold):
-                            console.print(
-                                f"      Warning: Tensor '{key}' contains values smaller than {threshold}. Scaling..."
-                            )
-                            value = scale_tensor_inplace(
-                                value.float(), threshold, scale_factor
-                            )
-                            # state_dict[key] = value.bfloat16()
-                            # targetがある場合は、target_modelに値を戻す。
-                            if target_model is not None:
-                                target_model.state_dict()[key] = value.bfloat16()
-                            else:  # targetがない場合は、base_modelに直接戻す
-                                base_models[0].state_dict()[key] = value.bfloat16()
+                    if not isinstance(value, torch.Tensor) or not value.is_floating_point():
+                        continue
+                    if torch.any((torch.abs(value) < threshold) & (value != 0)):
+                        console.print(
+                            f"      Warning: Tensor '{key}' contains values smaller than {threshold}. Scaling..."
+                        )
+                        scaled = scale_tensor_inplace(
+                            value.detach().clone().float(), threshold, scale_factor
+                        ).to(device=value.device, dtype=value.dtype)
+                        value.copy_(scaled)
 
             if target_model is None:
                 base_models[0].save_pretrained(savename)

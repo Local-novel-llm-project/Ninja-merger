@@ -1,21 +1,52 @@
+import ast
 import os
 import re
+from typing import Any, Dict, Iterable, Match
 
 from rich import print
 
 
-def parse_layer_specifications(layers_str):
-    if layers_str is None:
-        return [], []
+def _to_layer_tokens(layers_spec) -> list[str]:
+    if layers_spec is None:
+        return []
+
+    if isinstance(layers_spec, str):
+        raw_items = layers_spec.split(",")
+    elif isinstance(layers_spec, Iterable):
+        raw_items = []
+        for item in layers_spec:
+            if isinstance(item, str):
+                raw_items.extend(item.split(","))
+            else:
+                raw_items.append(str(item))
+    else:
+        raw_items = [str(layers_spec)]
+
+    return [item.strip() for item in raw_items if str(item).strip()]
+
+
+def parse_layer_specifications(layers_spec):
     ranges = []
     specific_layers = []
-    for layer in layers_str:
-        parts = layer.split(",")
-        if len(parts) > 1 and "-" in parts[1]:
-            start, end = map(int, parts[1].split("-"))
+
+    for token in _to_layer_tokens(layers_spec):
+        # Supported examples:
+        # - "model.layers.2-5"
+        # - "2-5"
+        range_match = re.search(r"model\.layers\.(\d+)\s*-\s*(\d+)", token)
+        if range_match is None:
+            range_match = re.fullmatch(r"(\d+)\s*-\s*(\d+)", token)
+
+        if range_match is not None:
+            start = int(range_match.group(1))
+            end = int(range_match.group(2))
+            if end < start:
+                start, end = end, start
             ranges.append(range(start, end + 1))
-        if parts[0].strip():
-            specific_layers.append(parts[0].strip())
+            continue
+
+        specific_layers.append(token)
+
     return ranges, specific_layers
 
 
@@ -44,13 +75,15 @@ def is_layer_included(
         )
         return included and not excluded
 
-    return len(include_specific) <= 0  # レイヤー名が特定の形式に合致しない場合は含める
+    # include 指定がある場合、形式に合致しないレイヤーは除外する。
+    return len(include_specific) <= 0 and len(include_ranges) <= 0
 
 
 def is_layer_dropped(layer_name, drop_ranges, drop_specific):
     # 特定のレイヤー名のチェック
-    if layer_name in drop_specific:
-        return True
+    for dropped in drop_specific:
+        if dropped in layer_name:
+            return True
 
     # レンジに基づくチェック
     match = re.search(r"model\.layers\.(\d+)", layer_name)
@@ -65,7 +98,23 @@ def is_layer_dropped(layer_name, drop_ranges, drop_specific):
 def parse_layers(layers_str):
     if layers_str is None:
         return None
-    return layers_str.split(",")
+    if isinstance(layers_str, str):
+        return [layer.strip() for layer in layers_str.split(",") if layer.strip()]
+    if isinstance(layers_str, Iterable):
+        return [str(layer).strip() for layer in layers_str if str(layer).strip()]
+    return [str(layers_str)]
+
+
+def _get_tensor_by_key(state_dict: Dict[str, Any], key: str, fallback_key: str):
+    if key in state_dict:
+        return state_dict[key]
+    return state_dict.get(fallback_key)
+
+
+def _shape_str(tensor: Any) -> str:
+    if hasattr(tensor, "shape"):
+        return str(tuple(tensor.shape))
+    return "N/A"
 
 
 def get_skip_layers(
@@ -79,9 +128,9 @@ def get_skip_layers(
 
     if target_model is None:
         base_state_dicts = [b.state_dict() for b in base_models]
-        target = base_state_dicts[0]  # 便宜上、最初の base model を使う
+        target_state_dict = base_state_dicts[0]  # 便宜上、最初の base model を使う
     else:
-        target = target_model.state_dict()
+        target_state_dict = target_model.state_dict()
         base_state_dicts = [b.state_dict() for b in base_models]
 
     if not isinstance(sub_models, list):
@@ -89,186 +138,122 @@ def get_skip_layers(
     sub_state_dicts = [s.state_dict() for s in sub_models]
 
     # --- すべてのキーを収集 ---
-    all_keys = set(target.keys())
+    all_keys = set(target_state_dict.keys())
     for base_state_dict in base_state_dicts:
         all_keys.update(base_state_dict.keys())
     for sub_state_dict in sub_state_dicts:
         all_keys.update(sub_state_dict.keys())
 
-    # 修正: unmatch_size_layer_op が only_common_range の場合、
-    # サイズチェックを行わず、マージ時に共通部分のみ使用するように変更
     if unmatch_size_layer_op == "only_common_range":
         print(
             "[cyan]Using only_common_range mode - Size mismatches will be handled during merging[/cyan]"
         )
-        # 重要なレイヤーでサイズの違いがあれば、ログに出力
-        for target_key in all_keys:
-            k = target_key
-            if is_llava_next:
-                k = target_key.replace("language_model.", "", 1)
 
-            # キーの存在チェックのみ行い、サイズチェックはスキップ
-            key_missing = False
-            for sub_state_dict in sub_state_dicts:
-                if k not in sub_state_dict:
-                    print(f"[yellow] Right key not found: {k}, skip...[/yellow]")
-                    skip_layers.append(k)
-                    key_missing = True
-                    break
-            if key_missing:
-                continue
+    for target_key in all_keys:
+        lookup_key = (
+            target_key.replace("language_model.", "", 1)
+            if is_llava_next
+            else target_key
+        )
 
+        missing = False
+        for sub_state_dict in sub_state_dicts:
+            if _get_tensor_by_key(sub_state_dict, lookup_key, target_key) is None:
+                print(f"[yellow] Right key not found: {lookup_key}, skip...[/yellow]")
+                skip_layers.append(lookup_key)
+                missing = True
+                break
+        if missing:
+            continue
+
+        for base_state_dict in base_state_dicts:
+            if _get_tensor_by_key(base_state_dict, lookup_key, target_key) is None:
+                print(f"[yellow] Base key not found: {lookup_key}, skip...[/yellow]")
+                skip_layers.append(lookup_key)
+                missing = True
+                break
+        if missing:
+            continue
+
+        reference = _get_tensor_by_key(target_state_dict, lookup_key, target_key)
+        if reference is None:
+            reference = _get_tensor_by_key(base_state_dicts[0], lookup_key, target_key)
+
+        if reference is None:
+            print(
+                f"[yellow]Warning: Invalid reference tensor for key '{target_key}', skip...[/yellow]"
+            )
+            skip_layers.append(target_key)
+            continue
+
+        # only_common_range ではサイズ不一致をスキップせず、警告のみ出す
+        if unmatch_size_layer_op == "only_common_range":
             for base_state_dict in base_state_dicts:
-                if k not in base_state_dict:
-                    print(f"[yellow] Base key not found: {k}, skip...[/yellow]")
-                    skip_layers.append(k)
-                    key_missing = True
-                    break
-            if key_missing:
-                continue
-
-            # サイズが異なる場合は警告を出すだけ
-            if target_model is not None:
-                target_tensor = target_model.state_dict().get(target_key)
-                base_tensor = base_state_dicts[0].get(target_key)
-                if hasattr(target_tensor, "size") and hasattr(base_tensor, "size"):
-                    if target_tensor.size() != base_tensor.size():
-                        print(
-                            f"[cyan] Base key size mismatch: {target_key}, will use common range[/cyan]"
-                        )
-                else:
+                base_tensor = _get_tensor_by_key(base_state_dict, lookup_key, target_key)
+                if (
+                    base_tensor is not None
+                    and hasattr(base_tensor, "shape")
+                    and hasattr(reference, "shape")
+                    and tuple(base_tensor.shape) != tuple(reference.shape)
+                ):
                     print(
-                        f"[yellow]Warning: Invalid tensor found for key '{target_key}' when comparing target and base. Skipping size check.[/yellow]"
+                        f"[cyan] Base key size mismatch: {target_key} ({_shape_str(base_tensor)} vs {_shape_str(reference)}), will use common range[/cyan]"
                     )
-                    print(
-                        f"[cyan] Base key size mismatch: {target_key}, will use common range[/cyan]"
-                    )
-                    # skip_layers には追加しない
-
             for sub_state_dict in sub_state_dicts:
-                if target_model is None:
-                    base_tensor = base_state_dicts[0].get(target_key)
-                    sub_tensor = sub_state_dict.get(target_key)
-                    if hasattr(base_tensor, "size") and hasattr(sub_tensor, "size"):
-                        if base_tensor.size() != sub_tensor.size():
-                            print(
-                                f"[cyan] Sub key size mismatch: {target_key}, will use common range[/cyan]"
-                            )
-                    else:
-                        print(
-                            f"[yellow]Warning: Invalid tensor found for key '{target_key}' when comparing base and sub. Skipping size check.[/yellow]"
-                        )
-                        print(
-                            f"[cyan] Sub key size mismatch: {target_key}, will use common range[/cyan]"
-                        )
-                        # skip_layers には追加しない
-                else:
-                    target_tensor = target_model.state_dict().get(target_key)
-                    sub_tensor = sub_state_dict.get(target_key)
-                    if hasattr(target_tensor, "size") and hasattr(sub_tensor, "size"):
-                        if target_tensor.size() != sub_tensor.size():
-                            print(
-                                f"[cyan] Sub key size mismatch: {target_key}, will use common range[/cyan]"
-                            )
-                    else:
-                        print(
-                            f"[yellow]Warning: Invalid tensor found for key '{target_key}' when comparing target and sub. Skipping size check.[/yellow]"
-                        )
-                        print(
-                            f"[cyan] Sub key size mismatch: {target_key}, will use common range[/cyan]"
-                        )
-                        # skip_layers には追加しない
-    else:
-        # 元の実装（サイズチェックを含む）
-        for target_key in all_keys:
-            k = target_key
-            if is_llava_next:
-                k = target_key.replace("language_model.", "", 1)
-
-            key_missing = False
-            for sub_state_dict in sub_state_dicts:
-                if k not in sub_state_dict:
-                    print(f"[yellow] Right key not found: {k}, skip...[/yellow]")
-                    skip_layers.append(k)
-                    key_missing = True
-                    break
-            if key_missing:
-                continue
-
-            for base_state_dict in base_state_dicts:
-                if k not in base_state_dict:
-                    print(f"[yellow] Base key not found: {k}, skip...[/yellow]")
-                    skip_layers.append(k)
-                    key_missing = True
-                    break
-            if key_missing:
-                continue
-            # サイズチェック
-            if target_model is not None:
-                target_tensor = target_model.state_dict().get(target_key)
-                base_tensor = base_state_dicts[0].get(target_key)
-                if hasattr(target_tensor, "size") and hasattr(base_tensor, "size"):
-                    if target_tensor.size() != base_tensor.size():
-                        print(
-                            f"[yellow] Base key size mismatch: {target_key}, skip...[/yellow]"
-                        )
-                        skip_layers.append(target_key)
-                        continue
-                else:
+                sub_tensor = _get_tensor_by_key(sub_state_dict, lookup_key, target_key)
+                if (
+                    sub_tensor is not None
+                    and hasattr(sub_tensor, "shape")
+                    and hasattr(reference, "shape")
+                    and tuple(sub_tensor.shape) != tuple(reference.shape)
+                ):
                     print(
-                        f"[yellow]Warning: Invalid tensor for key '{target_key}' in target/base, skip...[/yellow]"
+                        f"[cyan] Sub key size mismatch: {target_key} ({_shape_str(sub_tensor)} vs {_shape_str(reference)}), will use common range[/cyan]"
                     )
-                    skip_layers.append(target_key)
-                    continue
-                    print(
-                        f"[yellow] Base key size mismatch: {target_key}, skip...[/yellow]"
-                    )
-                    skip_layers.append(target_key)
-                    continue
-            for sub_state_dict in sub_state_dicts:
-                if target_model is None:
-                    base_tensor = base_state_dicts[0].get(target_key)
-                    sub_tensor = sub_state_dict.get(target_key)
-                    if hasattr(base_tensor, "size") and hasattr(sub_tensor, "size"):
-                        if base_tensor.size() != sub_tensor.size():
-                            print(
-                                f"[yellow] Sub key size mismatch: {target_key}, skip...[/yellow]"
-                            )
-                            skip_layers.append(target_key)
-                            break
-                    else:
-                        print(
-                            f"[yellow]Warning: Invalid tensor for key '{target_key}' in base/sub, skip...[/yellow]"
-                        )
-                        skip_layers.append(target_key)
-                        break
-                        print(
-                            f"[yellow] Sub key size mismatch: {target_key}, skip...[/yellow]"
-                        )
-                        skip_layers.append(target_key)
-                        break
-                else:
-                    target_tensor = target_model.state_dict().get(target_key)
-                    sub_tensor = sub_state_dict.get(target_key)
-                    if hasattr(target_tensor, "size") and hasattr(sub_tensor, "size"):
-                        if target_tensor.size() != sub_tensor.size():
-                            print(
-                                f"[yellow] Sub key size mismatch: {target_key}, skip...[/yellow]"
-                            )
-                            skip_layers.append(target_key)
-                            break
-                    else:
-                        print(
-                            f"[yellow]Warning: Invalid tensor for key '{target_key}' in target/sub, skip...[/yellow]"
-                        )
-                        skip_layers.append(target_key)
-                        break
-                        print(
-                            f"[yellow] Sub key size mismatch: {target_key}, skip...[/yellow]"
-                        )
-                        skip_layers.append(target_key)
-                        break
+            continue
 
+        # skip モードではサイズ不一致を除外
+        if not hasattr(reference, "shape"):
+            print(
+                f"[yellow]Warning: Invalid tensor for key '{target_key}', skip...[/yellow]"
+            )
+            skip_layers.append(target_key)
+            continue
+
+        mismatch = False
+        for base_state_dict in base_state_dicts:
+            base_tensor = _get_tensor_by_key(base_state_dict, lookup_key, target_key)
+            if (
+                base_tensor is None
+                or not hasattr(base_tensor, "shape")
+                or tuple(base_tensor.shape) != tuple(reference.shape)
+            ):
+                print(
+                    f"[yellow] Base key size mismatch: {target_key}, skip...[/yellow]"
+                )
+                skip_layers.append(target_key)
+                mismatch = True
+                break
+        if mismatch:
+            continue
+
+        for sub_state_dict in sub_state_dicts:
+            sub_tensor = _get_tensor_by_key(sub_state_dict, lookup_key, target_key)
+            if (
+                sub_tensor is None
+                or not hasattr(sub_tensor, "shape")
+                or tuple(sub_tensor.shape) != tuple(reference.shape)
+            ):
+                print(
+                    f"[yellow] Sub key size mismatch: {target_key}, skip...[/yellow]"
+                )
+                skip_layers.append(target_key)
+                mismatch = True
+                break
+        if mismatch:
+            continue
+
+    skip_layers = list(dict.fromkeys(skip_layers))
     print(f"Skip layers before return: {skip_layers}")
     return skip_layers
 
@@ -321,7 +306,7 @@ def is_qeic_target_layer(
         )
         return included and not excluded
 
-    return len(include_specific) <= 0
+    return len(include_specific) <= 0 and len(include_ranges) <= 0
 
 
 def prepare_velocities(velocities_config, state_dict):
@@ -335,7 +320,7 @@ def prepare_velocities(velocities_config, state_dict):
     Returns:
         dict: レイヤー名をキー、velocity 値を値とする辞書。
     """
-    per_layer_velocities = {}
+    per_layer_velocities: Dict[str, Any] = {}
     default_velocity = velocities_config.get("DEFAULT", 1.0)  # デフォルト値
 
     for layer_name in state_dict.keys():
@@ -344,36 +329,33 @@ def prepare_velocities(velocities_config, state_dict):
             if pattern == "DEFAULT":
                 continue
 
-            if isinstance(
-                velocity_info, (int, float, complex)
-            ):  # typeが指定されていない場合は、直接代入
+            if isinstance(velocity_info, (int, float, complex)):
                 # 単純な文字列マッチ
                 if layer_name.startswith(pattern):
                     per_layer_velocities[layer_name] = velocity_info
                     matched = True
                     break
-            elif (
-                isinstance(velocity_info, dict) and velocity_info.get("type") == "regex"
-            ):
-                # 正規表現マッチ
-                match = re.match(velocity_info["regex"], layer_name)
+
+            elif isinstance(velocity_info, dict) and velocity_info.get("type") == "regex":
+                # 正規表現マッチ。regex が未指定の場合は key 側を正規表現として扱う。
+                regex_pattern = velocity_info.get("regex", pattern)
+                match = re.match(regex_pattern, layer_name)
                 if match:
-                    value = velocity_info["value"]
+                    value = velocity_info.get("value", default_velocity)
                     if isinstance(value, (int, float, complex)):
-                        # そのままの値を設定
                         per_layer_velocities[layer_name] = value
                     elif isinstance(value, str):
-                        # 文字列の場合は、eval で評価 (キャプチャグループを使用可能)
-                        # 例: "0.1 * int(match.group(1))"
                         try:
-                            per_layer_velocities[layer_name] = eval(
-                                value, {"match": match, "layer_name": layer_name}
+                            per_layer_velocities[layer_name] = _safe_eval_expression(
+                                value, match, layer_name
                             )
                         except Exception as e:
                             print(
                                 f"Error evaluating velocity expression: {value}, error: {e}"
                             )
                             per_layer_velocities[layer_name] = default_velocity
+                    else:
+                        per_layer_velocities[layer_name] = default_velocity
                     matched = True
                     break
 
@@ -400,7 +382,7 @@ def prepare_post_velocities(post_velocities_config, state_dict):
     Returns:
         dict: レイヤー名をキー、post_velocity 値を値とする辞書。
     """
-    per_layer_post_velocities = {}
+    per_layer_post_velocities: Dict[str, Any] = {}
     default_post_velocity = post_velocities_config.get("DEFAULT", 1.0)
 
     for layer_name in state_dict.keys():
@@ -416,22 +398,19 @@ def prepare_post_velocities(post_velocities_config, state_dict):
                     matched = True
                     break
 
-            elif (
-                isinstance(post_velocity_info, dict)
-                and post_velocity_info.get("type") == "regex"
-            ):
-                # 正規表現マッチ
-                match = re.match(post_velocity_info["regex"], layer_name)
+            elif isinstance(post_velocity_info, dict) and post_velocity_info.get("type") == "regex":
+                # 正規表現マッチ。regex が未指定の場合は key 側を正規表現として扱う。
+                regex_pattern = post_velocity_info.get("regex", pattern)
+                match = re.match(regex_pattern, layer_name)
                 if match:
-                    value = post_velocity_info["value"]
+                    value = post_velocity_info.get("value", default_post_velocity)
                     if isinstance(value, (int, float, complex)):
                         # そのままの値を設定
                         per_layer_post_velocities[layer_name] = value
                     elif isinstance(value, str):
-                        # 文字列の場合は、eval で評価 (キャプチャグループを使用可能)
                         try:
-                            per_layer_post_velocities[layer_name] = eval(
-                                value, {"match": match, "layer_name": layer_name}
+                            per_layer_post_velocities[layer_name] = _safe_eval_expression(
+                                value, match, layer_name
                             )
                         except Exception as e:
                             print(
@@ -440,6 +419,8 @@ def prepare_post_velocities(post_velocities_config, state_dict):
                             per_layer_post_velocities[layer_name] = (
                                 default_post_velocity
                             )
+                    else:
+                        per_layer_post_velocities[layer_name] = default_post_velocity
                     matched = True
                     break
             else:
@@ -451,3 +432,80 @@ def prepare_post_velocities(post_velocities_config, state_dict):
             per_layer_post_velocities[layer_name] = default_post_velocity
 
     return per_layer_post_velocities
+
+
+_ALLOWED_FUNCS = {
+    "int": int,
+    "float": float,
+    "complex": complex,
+    "abs": abs,
+    "min": min,
+    "max": max,
+    "round": round,
+}
+
+
+def _safe_eval_expression(expr: str, match: Match[str], layer_name: str):
+    """Safely evaluates a restricted arithmetic expression for velocity configs."""
+    parsed = ast.parse(expr, mode="eval")
+
+    def eval_node(node):
+        if isinstance(node, ast.Expression):
+            return eval_node(node.body)
+
+        if isinstance(node, ast.Constant):
+            if isinstance(node.value, (int, float, complex, str)):
+                return node.value
+            raise ValueError("Unsupported constant value.")
+
+        if isinstance(node, ast.BinOp):
+            left = eval_node(node.left)
+            right = eval_node(node.right)
+
+            if isinstance(node.op, ast.Add):
+                return left + right
+            if isinstance(node.op, ast.Sub):
+                return left - right
+            if isinstance(node.op, ast.Mult):
+                return left * right
+            if isinstance(node.op, ast.Div):
+                return left / right
+            if isinstance(node.op, ast.Pow):
+                return left**right
+            if isinstance(node.op, ast.Mod):
+                return left % right
+            raise ValueError("Unsupported binary operator.")
+
+        if isinstance(node, ast.UnaryOp):
+            operand = eval_node(node.operand)
+            if isinstance(node.op, ast.UAdd):
+                return +operand
+            if isinstance(node.op, ast.USub):
+                return -operand
+            raise ValueError("Unsupported unary operator.")
+
+        if isinstance(node, ast.Name):
+            if node.id == "layer_name":
+                return layer_name
+            raise ValueError(f"Unsupported identifier: {node.id}")
+
+        if isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name) and node.func.id in _ALLOWED_FUNCS:
+                func = _ALLOWED_FUNCS[node.func.id]
+                args = [eval_node(arg) for arg in node.args]
+                return func(*args)
+
+            if (
+                isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "match"
+                and node.func.attr == "group"
+            ):
+                args = [eval_node(arg) for arg in node.args]
+                return match.group(*args)
+
+            raise ValueError("Unsupported function call.")
+
+        raise ValueError(f"Unsupported expression node: {type(node).__name__}")
+
+    return eval_node(parsed)

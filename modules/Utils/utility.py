@@ -198,37 +198,35 @@ def prepare_tensor_slices(
 ):
     """テンソルのスライスを準備するヘルパー関数。"""
     v = target_state_dict[key]
+    base_tensors = [b.state_dict()[key] for b in base_models if key in b.state_dict()]
+    sub_tensors = [s.state_dict()[key] for s in sub_models if key in s.state_dict()]
 
     if unmatch_size_layer_op == "only_common_range":
-        min_size = min(
-            v.shape,
-            *[b.state_dict()[key].shape for b in base_models if key in b.state_dict()],
-            *[s.state_dict()[key].shape for s in sub_models if key in s.state_dict()],
+        base_same_ndim = [t for t in base_tensors if t.ndim == v.ndim]
+        sub_same_ndim = [t for t in sub_tensors if t.ndim == v.ndim]
+
+        dropped_base = len(base_tensors) - len(base_same_ndim)
+        dropped_sub = len(sub_tensors) - len(sub_same_ndim)
+        if dropped_base > 0 or dropped_sub > 0:
+            console.print(
+                f"  [yellow]Layer {key}: skipped {dropped_base} base and {dropped_sub} sub tensors due to ndim mismatch in only_common_range mode.[/yellow]"
+            )
+
+        common_tensors = [v] + base_same_ndim + sub_same_ndim
+        min_size = tuple(
+            min(t.shape[dim] for t in common_tensors) for dim in range(v.ndim)
         )
         console.print(
             f"  [cyan]Merging only common range for layer {key}. Common size: {min_size}[/cyan]"
         )
-    else:
-        min_size = v.shape
 
-    v_slice = (
-        slice_tensor(v, min_size) if unmatch_size_layer_op == "only_common_range" else v
-    )
-    base_slices = [
-        slice_tensor(b.state_dict()[key], min_size)
-        if unmatch_size_layer_op == "only_common_range"
-        else b.state_dict()[key]
-        for b in base_models
-        if key in b.state_dict()
-    ]
-    sub_slices = [
-        slice_tensor(s.state_dict()[key], min_size)
-        if unmatch_size_layer_op == "only_common_range"
-        else s.state_dict()[key]
-        for s in sub_models
-        if key in s.state_dict()
-    ]
-    return v_slice, base_slices, sub_slices, min_size
+        v_slice = slice_tensor(v, min_size)
+        base_slices = [slice_tensor(t, min_size) for t in base_same_ndim]
+        sub_slices = [slice_tensor(t, min_size) for t in sub_same_ndim]
+        return v_slice, base_slices, sub_slices, min_size
+
+    min_size = tuple(v.shape)
+    return v, base_tensors, sub_tensors, min_size
 
 
 def to_complex_tensor(val, device, dtype):

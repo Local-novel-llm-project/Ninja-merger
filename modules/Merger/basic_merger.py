@@ -15,10 +15,7 @@ class BasicMerger(Merger):
         self.console.rule("[bold blue]Starting Basic Model Merge Process[/bold blue]")
         self._filter_layers()
 
-        for k in torch.utils.data.DataLoader(
-            list(self.target_state_dict.keys()), batch_size=1
-        ):
-            k = k[0]
+        for k in self.target_state_dict.keys():
             if k not in self.included_layers:
                 continue
 
@@ -30,6 +27,11 @@ class BasicMerger(Merger):
             self._log_operation_details(k)
             try:
                 base_processed_values = []
+                post_velocity = (
+                    self.post_velocity.get(k, 1.0)
+                    if isinstance(self.post_velocity, dict)
+                    else self.post_velocity
+                )
 
                 if self.velocity is None:
                     velocity = 1.0
@@ -38,20 +40,15 @@ class BasicMerger(Merger):
                 else:
                     velocity = self.velocity
 
-                for b_idx, (b_slice, b) in enumerate(
-                    zip(base_slices, self.base_models)
-                ):
-                    for s_idx, (s_slice, s) in enumerate(
-                        zip(sub_slices, self.sub_models)
-                    ):
-                        if id(b_slice) != id(s_slice):
-                            processed = OPERATION_DICT[self.operation](
-                                v_slice,
-                                b_slice,
-                                s_slice,
-                                velocity,
-                            )
-                            base_processed_values.append(processed)
+                for b_slice in base_slices:
+                    for s_slice in sub_slices:
+                        processed = OPERATION_DICT[self.operation](
+                            v_slice,
+                            b_slice,
+                            s_slice,
+                            velocity,
+                        )
+                        base_processed_values.append(processed)
 
                 if not base_processed_values:
                     self.console.print(
@@ -59,7 +56,11 @@ class BasicMerger(Merger):
                     )
                     continue
 
-                processed_v = base_processed_values[0]
+                if len(base_processed_values) == 1:
+                    processed_v = base_processed_values[0]
+                else:
+                    # 複数ペアを処理した場合は平均化して安定化。
+                    processed_v = torch.stack(base_processed_values, dim=0).mean(dim=0)
 
                 # 前処理
                 processed_v = preprocess_tensor(processed_v, self.preprocess)
@@ -77,9 +78,7 @@ class BasicMerger(Merger):
                 processed_v = post_process_tensor(
                     processed_v,
                     self.post_operation,
-                    self.post_velocity[k]
-                    if isinstance(self.post_velocity, dict)
-                    else self.post_velocity,
+                    post_velocity,
                     v_slice,
                 )
 

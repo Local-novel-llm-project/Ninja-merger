@@ -24,7 +24,11 @@ def load_model(model_path, device, torch_dtype):
         model = DummyModel(state_dict)
     elif model_path.endswith(".pth") or model_path.endswith(".bin"):
         data = torch.load(model_path, map_location=device)
-        if isinstance(data, dict) and "state_dict" in data:
+        if isinstance(data, dict) and "model" in data:
+            state_dict = data["model"]
+            config_dict = data.get("config")
+            model = DummyModel(state_dict, config_dict=config_dict)
+        elif isinstance(data, dict) and "state_dict" in data:
             state_dict = data["state_dict"]
             config_dict = data.get("config")
             model = DummyModel(state_dict, config_dict=config_dict)
@@ -53,7 +57,7 @@ def load_config(config_path):
         raise FileNotFoundError(f"Config file not found: {config_path} or {yaml_path}")
 
     models_list = config["models"]
-    use_scaling = config.get("use_scale", False)
+    use_scaling = config.get("use_scaling", config.get("use_scale", False))
 
     # key_transformations と insert_layers を models 内の各 model_config にマージ
     key_transformations = config.get("key_transformations", {})
@@ -63,13 +67,26 @@ def load_config(config_path):
         for model_type in ["left", "right", "target"]:
             if model_type not in model_entry:
                 continue
-            if isinstance(model_entry[model_type], str):
+
+            if model_type in ["left", "right"] and isinstance(
+                model_entry[model_type], str
+            ):
                 model_entry[model_type] = [model_entry[model_type]]
 
-            if not isinstance(model_entry[model_type], list):
-                continue
+            if model_type in ["left", "right"]:
+                if not isinstance(model_entry[model_type], list):
+                    continue
+                model_names = model_entry[model_type]
+            else:
+                target_value = model_entry[model_type]
+                if isinstance(target_value, list):
+                    model_names = target_value
+                elif isinstance(target_value, str):
+                    model_names = [target_value]
+                else:
+                    model_names = []
 
-            for model_name in model_entry[model_type]:
+            for model_name in model_names:
                 if model_name == "recurrent":
                     continue
 
@@ -87,24 +104,22 @@ def load_config(config_path):
                     model_entry["model_config"][model_name] = {}
                 model_entry["model_config"][model_name].update(merged_config)
 
-        # velocity の処理 (既存のコード)
-        if "velocities" in model_entry:
-            model_entry["velocity"] = model_entry.pop("velocities")
-
         velocity = model_entry.get("velocity")
-        if velocity is None:
+        has_velocities = "velocities" in model_entry
+
+        if velocity is None and not has_velocities:
             model_entry["velocity"] = 1.0
         elif isinstance(velocity, dict) and "real" in velocity and "imag" in velocity:
             model_entry["velocity"] = torch.complex(
                 torch.tensor(velocity["real"]), torch.tensor(velocity["imag"])
             )
         # ... (その他の velocity の処理) ...
-        elif isinstance(velocity, (int, float)):
-            # 修正: int, float の場合はそのままの値を使用
+        elif isinstance(velocity, (int, float, complex)):
+            # 修正: スカラー値の場合はそのままの値を使用
             model_entry["velocity"] = velocity
 
         # post_velocity の処理
-        if "post_velocity" not in model_entry:
+        if "post_velocity" not in model_entry and "post_velocities" not in model_entry:
             model_entry["post_velocity"] = 1.0
 
         # target が存在しない場合は、null を設定

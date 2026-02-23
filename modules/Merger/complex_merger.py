@@ -18,36 +18,31 @@ class ComplexMerger(Merger):
         self.console.rule("[bold blue]Starting Complex Model Merge Process[/bold blue]")
         self._filter_layers()
 
-        for k in torch.utils.data.DataLoader(
-            list(self.target_state_dict.keys()), batch_size=1
-        ):
-            k = k[0]
-            if k not in self.included_layers:
+        for target_k in self.target_state_dict.keys():
+            if target_k not in self.included_layers:
                 continue
 
-            target_k = k
-            if self.is_llava_next:
-                k = k.replace("language_model.", "", 1)
-
-            if not self._check_layer_compatibility(k):
+            if not self._check_layer_compatibility(target_k):
                 self.excluded_layers.append(target_k)
                 continue
 
-            # 変更: ヘルパー関数を使用
-            v_slice, base_slices, sub_slices, min_size = prepare_tensor_slices(
+            v_slice, base_slices, sub_slices, _ = prepare_tensor_slices(
                 self.target_state_dict,
-                k,
+                target_k,
                 self.base_models,
                 self.sub_models,
                 self.unmatch_size_layer_op,
                 self.console,
             )
-            self._log_operation_details(k)
+            self._log_operation_details(target_k)
 
             # velocity を取得 (レイヤーごとに異なる可能性がある)
-            velocity = (
-                self.velocity[k] if isinstance(self.velocity, dict) else self.velocity
-            )
+            if self.velocity is None:
+                velocity = 1.0
+            elif isinstance(self.velocity, dict):
+                velocity = self.velocity.get(target_k, 1.0)
+            else:
+                velocity = self.velocity
 
             if self.operation == "complexadd":
                 self.console.print(
@@ -111,14 +106,17 @@ class ComplexMerger(Merger):
                     )
                 )
                 try:
+                    post_operation_func = POST_OPERATION_DICT.get(
+                        self.post_operation,
+                        lambda original_tensor, processed_tensor, post_velocity: processed_tensor,
+                    )
                     before_tensor = v_slice
                     self._display_tensor_info(
                         "AngleMerge - Before", before_tensor, "yellow"
                     )
 
-                    # 変更: Utils からインポートした OPERATION_DICT を使用
                     processed_v = OPERATION_DICT[self.operation](
-                        POST_OPERATION_DICT[self.post_operation],  # ここも
+                        post_operation_func,
                         v_slice,
                         sub_slices,
                         velocity,  # ここ、velocityで良い？
@@ -179,7 +177,7 @@ class ComplexMerger(Merger):
                         velocity,  # ここ、velocityで良い？
                         complex_mix_func=ComplexMix,
                         t_calc_func=norm_angle_t_calc,
-                        **{"layer_key": k},
+                        **{"layer_key": target_k},
                     )
 
                     self._display_tensor_info(

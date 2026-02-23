@@ -12,7 +12,7 @@ from ..Utils.layers import (
     is_layer_included,
     parse_layer_specifications,
 )
-from ..Utils.utility import to_complex_tensor
+from ..Utils.utility import prepare_tensor_slices, to_complex_tensor
 
 
 class Merger(ABC):
@@ -96,7 +96,7 @@ class Merger(ABC):
         self.force_merge_single = force_merge_single
         self.v2s_empty_default = v2s_empty_default
         self.v2s_single_default = v2s_single_default
-        self.model_dict = model_dict
+        self.model_dict = model_dict or {}
         self.console = Console()
 
         # ターゲットモデルの初期化
@@ -169,11 +169,15 @@ class Merger(ABC):
             - A list of tensor slices from the sub models.
             - A list of tensor slices from the velocity-to-slice models (if any).
         """
-        v_slice = self.target_state_dict[k]
-        base_slices = [b.state_dict()[k] for b in self.base_models]
-        sub_slices = [s.state_dict()[k] for s in self.sub_models]
+        v_slice, base_slices, sub_slices, _ = prepare_tensor_slices(
+            self.target_state_dict,
+            k,
+            self.base_models,
+            self.sub_models,
+            self.unmatch_size_layer_op,
+            self.console,
+        )
         v2s_slices = []  # Placeholder for now
-
         return v_slice, base_slices, sub_slices, v2s_slices
 
     def _display_tensor_info(self, title: str, tensor: torch.Tensor, prefix: str = ""):
@@ -250,30 +254,35 @@ class Merger(ABC):
         """
         for k in self.target_state_dict.keys():
             target_k = k
-            if self.is_llava_next:
-                k = k.replace("language_model.", "", 1)  # llava-next 用のキー調整
+            normalized_key = (
+                k.replace("language_model.", "", 1) if self.is_llava_next else k
+            )
 
             # レイヤーのドロップ、スキップ、除外判定
-            if is_layer_dropped(k, self.drop_ranges, self.drop_specific):
-                self.dropped_layers.append(k)
-                self.console.print(f"  [red]Dropping layer: {k}[/red]")
+            if is_layer_dropped(normalized_key, self.drop_ranges, self.drop_specific):
+                self.dropped_layers.append(target_k)
+                self.console.print(f"  [red]Dropping layer: {target_k}[/red]")
                 continue
-            if (k in self.skip_layers) or (self.skip_layernorm and "layernorm" in k):
-                self.excluded_layers.append(k)
-                self.console.print(f"  [yellow]Skipping layer: {k}[/yellow]")
+            if (
+                normalized_key in self.skip_layers
+                or target_k in self.skip_layers
+                or (self.skip_layernorm and "layernorm" in normalized_key.lower())
+            ):
+                self.excluded_layers.append(target_k)
+                self.console.print(f"  [yellow]Skipping layer: {target_k}[/yellow]")
                 continue
             if not is_layer_included(
-                k,
+                normalized_key,
                 self.include_ranges,
                 self.include_specific,
                 self.exclude_ranges,
                 self.exclude_specific,
             ):
-                self.excluded_layers.append(k)
-                self.console.print(f"  [yellow]Excluding layer: {k}[/yellow]")
+                self.excluded_layers.append(target_k)
+                self.console.print(f"  [yellow]Excluding layer: {target_k}[/yellow]")
                 continue
-            self.included_layers.append(k)
-            self.console.print(f"  [green]Including layer: {k}[/green]")
+            self.included_layers.append(target_k)
+            self.console.print(f"  [green]Including layer: {target_k}[/green]")
 
     def _print_summary(self):
         """Prints a summary table of which layers were included, excluded, or dropped."""

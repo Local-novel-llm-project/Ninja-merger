@@ -145,8 +145,16 @@ def prepare_model_metadata(model_dict):
 
     # target 関連
     metadata["target_value"] = model_dict.get("target")
+    metadata["target_value_scalar"] = (
+        metadata["target_value"][0]
+        if isinstance(metadata["target_value"], list)
+        and len(metadata["target_value"]) == 1
+        else metadata["target_value"]
+    )
     metadata["is_llava_next"] = False  # デフォルト値
-    if metadata["target_value"] in ["llava", "vlm", "llava-next"]:
+    if isinstance(metadata["target_value_scalar"], str) and metadata[
+        "target_value_scalar"
+    ].lower() in ["llava", "vlm", "llava-next"]:
         metadata["is_llava_next"] = True
 
     # マージ設定
@@ -163,7 +171,7 @@ def prepare_model_metadata(model_dict):
     metadata["force_merge_single"] = model_dict.get("force_merge_single", False)
     metadata["v2s_empty_default"] = model_dict.get("v2s_empty_default", "v1")
     metadata["v2s_single_default"] = model_dict.get("v2s_single_default", "auto")
-    metadata["use_scaling"] = model_dict.get("use_scaling", True)
+    metadata["use_scaling"] = model_dict.get("use_scaling")
 
     # velocities, post_velocities は load_and_prepare_models で処理
     # model_config も同様
