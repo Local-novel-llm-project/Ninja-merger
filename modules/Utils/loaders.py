@@ -6,7 +6,7 @@ from peft import PeftModel
 from safetensors.torch import load_file
 from transformers import (
     AutoModelForCausalLM,
-    AutoModelForVision2Seq,
+    AutoModelForImageTextToText,
     AutoTokenizer,
 )
 
@@ -130,7 +130,7 @@ def load_config(config_path):
 
 
 def load_vlm_model(model, lora_name, device, torch_dtype):
-    model = AutoModelForVision2Seq.from_pretrained(
+    model = AutoModelForImageTextToText.from_pretrained(
         model, torch_dtype=torch_dtype, device_map=device, low_cpu_mem_usage=True
     )
     if lora_name is not None:

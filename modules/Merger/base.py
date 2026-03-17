@@ -205,11 +205,7 @@ class Merger(ABC):
                 self.target_state_dict[k].dtype,
             )
         else:
-            velocity_display = to_complex_tensor(
-                self.velocity,
-                self.target_state_dict[k].device,
-                self.target_state_dict[k].dtype,
-            )
+            velocity_display = torch.tensor(self.velocity, device=self.target_state_dict[k].device, dtype=self.target_state_dict[k].dtype)
         if isinstance(self.post_velocity, dict):
             post_velocity_display = to_complex_tensor(
                 self.post_velocity.get(k, 0.0),  # デフォルト値 0.0
@@ -217,11 +213,8 @@ class Merger(ABC):
                 self.target_state_dict[k].dtype,
             )
         else:
-            post_velocity_display = to_complex_tensor(
-                self.post_velocity,
-                self.target_state_dict[k].device,
-                self.target_state_dict[k].dtype,
-            )
+            post_velocity_display = torch.tensor(self.post_velocity, device=self.target_state_dict[k].device, dtype=self.target_state_dict[k].dtype)
+            
         if isinstance(velocity_display, torch.Tensor) and velocity_display.is_complex():
             velocity_display = f"{velocity_display.real.item():.4f}+{velocity_display.imag.item():.4f}j"
         elif isinstance(velocity_display, complex):

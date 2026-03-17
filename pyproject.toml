@@ -1,0 +1,18 @@
+[project]
+name = "ninja-merger"
+version = "0.1.0"
+description = "Ninja Merger is a tool for merging PyTorch-based deep learning models"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "accelerate>=1.13.0",
+    "peft>=0.18.1",
+    "protobuf>=7.34.0",
+    "pyyaml>=6.0.3",
+    "rich>=14.3.3",
+    "scipy>=1.17.1",
+    "sentencepiece>=0.2.1",
+    "torch>=2.2.1",
+    "tqdm>=4.67.3",
+    "transformers>=4.40.1",
+]
