@@ -1,9 +1,10 @@
 # config.yaml (チートシート)
 
-# グローバル設定 (モデル全体に適用される設定)
+# CLI 専用の設定
 # ----------------------------------------
-torch_dtype: bfloat16  # モデルの読み込み/保存に使用するデータ型 (float32, bfloat16 など)
-skip_layernorm: false # True に設定すると、レイヤー正規化層をマージから除外
+# torch_dtype と skip_layernorm は load_config() では読み込まれません。
+# 次のように CLI オプションで指定します。
+#   python main.py -c config.yaml --torch-dtype bfloat16 --skip-layernorm
 
 # マージ設定 (複数のマージ設定をリスト形式で記述可能)
 # ----------------------------------------
@@ -23,9 +24,9 @@ models:
       # - model4.pth
 
     # --- マージ結果の出力先 ---
-    #   null: 新しいモデルを作成 (デフォルト)
-    #   "recurrent": 前回のマージ結果を上書き
-    #   既存のモデルのパス: 指定したモデルを上書き
+    #   null: 疎ベクトルアーティファクトを作成 (<out_dir>/vector/*.difftensors)
+    #   "recurrent": 同一実行内の前回マージ結果を使う
+    #   既存のモデルのパス: target としてロードし、結果は <out_dir>/<target名>/... に保存
 
     # --- マージ方法 ---
     operation: add  # 加算 (add, sub, mul, div, mix, avg, concat, maxpool, minpool, geometric_mean, std_sub, widen, complexadd, angle_merge, complex_angle_merge, qeic_add, qeic_mix, qeic_sub)
@@ -34,17 +35,17 @@ models:
     #   辞書形式で指定: {レイヤー名 (またはパターン): velocity 値}
     #   DEFAULT キーでデフォルト値を指定可能 (省略時は 1.0)
     velocities:
-      "model.embed_tokens.": 0.1  # embedding 層
-      "model.layers.0.": 0.2     # 最初の layer
+      "model.embed_tokens.": 0.1  # 埋め込み層
+      "model.layers.0.": 0.2     # 最初のレイヤー
       "model.layers.1.": 0.3
-      "model.layers.(\\d+).":    # 正規表現で layer を指定 (キャプチャグループを使用可能)
+      "model.layers.(\\d+).":    # 正規表現でレイヤーを指定 (キャプチャグループを使用可能)
         type: regex
-        value: "0.4 + 0.01 * int(match.group(1))"  # layer 番号に応じて増加 (例: 0.41, 0.42, 0.43, ...)
+        value: "0.4 + 0.01 * int(match.group(1))"  # レイヤー番号に応じて増加 (例: 0.41, 0.42, 0.43, ...)
       "model.layers.(1[0-9]|2[0-3]).": # 正規表現
         type: regex
         value: 0.9
-      "model.norm.": 0.7          # 最後の normalization
-      "lm_head.": 0.8             # 言語モデルの head
+      "model.norm.": 0.7          # 最後の正規化層
+      "lm_head.": 0.8             # 言語モデルのヘッド
       "DEFAULT": 0.5              # デフォルト値 (上記のパターンにマッチしないレイヤーに適用)
       # 注意: complex_angle_merge の場合は、この velocities は無視され、velocity の値が使用される
 
@@ -63,7 +64,7 @@ models:
 
     # --- モデル全体に適用する velocity (オプション, velocities が指定されていない場合) ---
     velocity: 1.0  # 単一の値 (スカラーまたは複素数)
-    # velocity: 0.2+0.3j  # 複素数の例
+    # velocity: {real: 0.2, imag: 0.3}  # 複素数の例。レイヤー別 velocities ではこの形式は正規化されません。
 
     # --- モデル全体に適用する post_velocity (オプション, post_velocities が指定されていない場合) ---
     post_velocity: 1.0
@@ -72,13 +73,15 @@ models:
     post_operation: add  # (add, sub, subfrom, mul, div, divby, mix, concat, maxpool, minpool, geometric_mean, angle)
 
     # --- 前処理 ---
+    # pcd はレジストリ上は存在しますが、現行 BasicMerger の通常経路では
+    # 呼び出し形が噛み合っていないため、通常は none を使います。
     preprocess: none # (none, pcd)
 
     # --- 後処理 ---
     post_preprocess: none # (none)
 
     # --- 正規化 ---
-    normalization: none # (none, norm_std_mean, match_std_mean, proc_std_mean, angle_merge)
+    normalization: none # (none, norm_std_mean, match_std_mean, proc_std_mean, angle_merge, quantile_match)
 
     # --- マージに含める/除外するレイヤー (オプション) ---
     include_layers: null # カンマ区切りの文字列、またはリストで指定 (例: "model.layers.0,model.layers.1", ["model.layers.0", "model.layers.1"])
@@ -88,13 +91,9 @@ models:
     # --- レイヤーサイズが一致しない場合の挙動 ---
     unmatch_size_layer_op: skip  # skip (スキップ), only_common_range (共通部分のみを使用)
 
-    # --- force_merge_single ---
+    # --- 互換用の予約的な補助指定 ---
     force_merge_single: False
-
-    # --- v2s_empty_default ---
     v2s_empty_default: v1
-
-    # --- v2s_single_default ---
     v2s_single_default: auto
 
     # --- 各モデルに適用する詳細設定 (キー変換、レイヤー挿入) ---
@@ -126,6 +125,9 @@ models:
 
       # (他のモデルの設定 ...)
 
-  # (別のマージ設定)
-  - name: my_merge_config_2
-    # ...
+  # (別のマージ設定を追加する場合)
+  # - name: my_merge_config_2
+  #   target: null
+  #   left: modelA.safetensors
+  #   right: modelB.safetensors
+  #   operation: sub

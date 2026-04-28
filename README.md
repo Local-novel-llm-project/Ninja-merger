@@ -1,120 +1,129 @@
-
-# 🥷 Ninja Merger
+# Ninja Merger
 
 [English](README.md) | [日本語](README_ja.md)
 
-## Overview
+Ninja Merger merges PyTorch and Hugging Face model files from YAML
+recipes. It can save a full model when you provide an explicit `target`, save a
+sparse vector artifact when `target` is `null`, chain steps through `recurrent`,
+filter or drop layers, and apply registered merge operations such as arithmetic,
+angle-based, Widen, and QEIC merges.
 
-Ninja Merger is a tool for merging PyTorch-based deep learning models, particularly Transformer models.  It allows you to combine multiple models to create new models or fine-tune existing ones. It supports a variety of merging methods (addition, subtraction, mixing, QEIC, etc.), providing flexibility in how you merge your models.
+This README is the quick entry point. Detailed, code-aligned references live in
+[docs/README.md](docs/README.md); those detailed pages are currently maintained
+primarily in Japanese.
 
-## Features
+## Current Capabilities
 
-*   **Diverse Merging Methods:**
-    *   Basic arithmetic operations (addition, subtraction, multiplication, division)
-    *   Model mixing (Mix, Average)
-    *   Passthrough copying for layer filtering/export workflows
-    *   Tensor concatenation (Concatenation)
-    *   Max/Min pooling (MaxPool, MinPool)
-    *   Geometric mean (GeometricMean)
-    *   Subtraction with standard deviation consideration (StdSub)
-    *   Model widening (WidenMerge)
-    *   Complex number-based merging (ComplexAdd, ComplexAngleMerge)
-    *   Quantum-entanglement-inspired calculation-based merging (QEICAdd, QeicMix, QeicSub)
-*   **Flexible Configuration:**
-    *   Uses YAML configuration files for detailed control over the merging process.
-    *   Manages multiple model merging configurations within a single file.
-    *   Allows defining model-specific settings (key transformations, layer insertion).
-    *   Enables setting per-layer velocities.
-    *   Specifies layers to be merged by range or name.
-    *   Offers options for handling layers with mismatched sizes (skip or use only the common part).
-*   **LoRA Support:**
-    *   Automatically merges LoRA (Low-Rank Adaptation) models.
-*   **Layer Removal:**
-    *   `drop_layers` can remove selected layers from the output model `state_dict`.
-*   **Detailed Logging:**
-    *   Provides visually appealing and informative log output using the `rich` library.
-*   **Extensibility:**
-    *   Modular structure makes it easy to add new merging methods and pre/post-processing options.
+- YAML-driven multi-step merge recipes under the required `models` section.
+- Model inputs from Hugging Face model ids/directories, `*.safetensors`, `*.pth`,
+  `*.bin`, and Ninja Merger `*.difftensors` artifacts.
+- Full target-model output when `target` points to an existing model.
+- Sparse vector output as `*.difftensors` when `target` is `null` / `none`.
+- Previous-step reuse through `recurrent` in `left`, `right`, or `target`.
+- Layer inclusion, exclusion, dropping, layer-name dumping, and mismatch handling.
+- Per-layer `velocity` / `post_velocity` values with prefix or regex matching.
+- Operation registry covering basic arithmetic, `passthrough`, `none`, Widen,
+  angle/complex merges, and QEIC operations. `complex_mix` is registered but not
+  implemented.
+- Rich progress display, per-step summaries, and saved recipe files.
 
 ## Installation
 
+Python `>=3.13` is declared in `pyproject.toml`.
+
 ```bash
 git clone https://github.com/Local-novel-llm-project/Ninja-merger.git
-cd ninja-merger
+cd Ninja-merger
+uv sync
+```
+
+If you are not using `uv`, install the runtime dependencies directly:
+
+```bash
 pip install -r requirements.txt
 ```
 
-## Usage
+## Quick Start
 
-1.  **Create a Configuration File:** Create a YAML file named `config.yaml` and specify the models to be merged, the merging method, and other options.
-2.  **Run the Command:** Execute the following command to merge the models.
-
-```bash
-python main.py -c config.yaml -o merged_models
-```
-
-## Supported Formats
-
-*   `*.safetensors`
-*   AutomodelForCausalLM (HuggingFace)
-
-## Configuration File Example
+Use an explicit `target` when you want Ninja Merger to save a full model output.
+The default `post_operation` is `add`, so set `post_operation: none` when the
+merge result itself should replace the target layer value.
 
 ```yaml
 models:
-- name: "model_add"
-  left: "path/to/model1"
-  right: "path/to/model2"
-  operation: "add"
-- name: "model_mix_recurrent"
-  left: "model_add"  # result of the previous merge operation
-  right: "path/to/model3"
-  operation: "mix"
-  velocity: 0.5
-- name: "model_passthrough"
-  left: "path/to/model4"
-  operation: "passthrough"
-  drop_layers:
-    - "model.layers.24"
-    - "lm_head"
+  - name: mix-full-model
+    target: path/to/target-model
+    left: path/to/base-model
+    right: path/to/tuned-model
+    operation: mix
+    velocity: 0.35
+    post_operation: none
 ```
 
-## Command-Line Arguments
+Run the merge:
 
-```
-usage: main.py [-h] [-c CONFIG] [-o OUT_DIR] [-n] [-dm MERGE_MODELS_DEVICE] [-dt TARGET_MODEL_DEVICE] [-t TORCH_DTYPE] [-r RECURRENT_MODE] [-d] [-l]
-               [--dump_layers] [--include_layers INCLUDE_LAYERS] [--exclude_layers EXCLUDE_LAYERS]
-
-Merge models
-
-optional arguments:
-  -h, --help            show this help message and exit
-  -c CONFIG, --config CONFIG
-                        Path to the JSON configuration file
-  -o OUT_DIR, --out_dir OUT_DIR
-                        Directory to save the merged model
-  -n, --skip_layernorm  Skip layernorm during merging
-  -dm MERGE_MODELS_DEVICE, --merge_models_device MERGE_MODELS_DEVICE
-                        Device for merging models
-  -dt TARGET_MODEL_DEVICE, --target_model_device TARGET_MODEL_DEVICE
-                        Device for the target model
-  -t TORCH_DTYPE, --torch_dtype TORCH_DTYPE
-                        Torch data type
-  -r RECURRENT_MODE, --recurrent_mode RECURRENT_MODE
-                        use target recurrent mode
-  -d, --dry_run         Dump processed layer infos without merging
-  -l, --save_only_last_model
-                        Only last model saved
-  --dump_layers         Dump model layers to a file instead of merging
-  --include_layers INCLUDE_LAYERS
-                        Comma-separated list of layers to include
-  --exclude_layers EXCLUDE_LAYERS
-                        Comma-separated list of layers to exclude
+```bash
+python main.py -c config.yaml -o merged_models --merge-models-device cuda:0 --target-model-device cuda:0 --torch-dtype bfloat16
 ```
 
-## Contributing
+To create a sparse vector artifact instead of a full model, use `target: null`.
+Ninja Merger uses the first `left` model as the in-memory layer source and saves
+only non-zero tensors to `merged_models/vector/*.difftensors`; it does not save a
+tokenizer or full model directory. Because `post_operation` still defaults to
+`add`, set `post_operation: none` for a plain delta such as `left - right`.
 
-Bug reports, feature requests, and pull requests are welcome.
+```yaml
+models:
+  - name: delta-vector
+    target: null
+    left: path/to/base-model
+    right: path/to/tuned-model
+    operation: sub
+    post_operation: none
+```
+
+## CLI Essentials
+
+```bash
+python main.py -c model_config.yaml -o merged_models
+```
+
+Common options:
+
+| Option | Meaning |
+| --- | --- |
+| `-c`, `--config` | YAML merge recipe. Default: `model_config.yaml`. |
+| `-o`, `--out-dir` | Output directory. Default: `./merged_models`. |
+| `-dm`, `--merge-models-device` | Device for `left` / `right` models. Default: `cpu`. |
+| `-dt`, `--target-model-device` | Device for explicit `target` models. Default: `cpu`. |
+| `-t`, `--torch-dtype` | One of `float16`, `bfloat16`, `float32`, `float64`. |
+| `--no-recurrent-mode` | Disable previous-step reuse. |
+| `-l`, `--save-only-last-model` | Keep intermediate steps in memory and save only the final step. |
+| `-d`, `--dry-run` | Run the merge path without saving output artifacts. |
+| `--dump-layers` | Write layer names instead of merging. Cannot be combined with `--dry-run`. |
+| `--include-layers`, `--exclude-layers` | CLI layer filters. They override per-entry filters. |
+
+See [docs/cli.md](docs/cli.md) for the complete CLI reference.
+
+## Documentation
+
+- [docs/README.md](docs/README.md): documentation index. Detailed reference
+  pages are currently maintained primarily in Japanese.
+- [docs/configuration.md](docs/configuration.md): YAML schema, defaults, examples.
+- [docs/operations.md](docs/operations.md): merge operations and modifiers.
+- [docs/output-artifacts.md](docs/output-artifacts.md): inputs, outputs, and artifact layout.
+- [docs/cli.md](docs/cli.md): command-line behavior.
+- [docs/examples-and-tools.md](docs/examples-and-tools.md): examples and auxiliary tools.
+
+## Development
+
+```bash
+pytest
+```
+
+The tests exercise parser behavior, config normalization, operation registry
+validation, layer handling, sparse vector artifacts, and generated reference
+cases for implemented merge operations.
 
 ## License
 

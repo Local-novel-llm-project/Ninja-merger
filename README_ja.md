@@ -1,116 +1,111 @@
-# 🥷 Ninja Merger
+# Ninja Merger
 
 [English](README.md) | [日本語](README_ja.md)
 
-## 概要
+Ninja Merger は、YAML レシピをもとに PyTorch / Hugging Face 系モデルをマージするツールです。明示的な `target` を指定したフルモデル出力、`target: null` による疎なマージベクトル、複数ステップの `recurrent` チェーン、レイヤー単位のフィルタリング、各種マージ演算を扱えます。
 
-Ninja Merger は、PyTorch ベースの深層学習モデル (特に Transformer モデル) をマージするためのツールです。複数のモデルを組み合わせて、新しいモデルを作成したり、既存のモデルを微調整したりすることができます。さまざまなマージ手法 (加算、減算、混合、QEIC など) をサポートしており、柔軟なモデルマージが可能です。
+この README は入口用です。実装に合わせた詳細仕様は [docs/README.md](docs/README.md) から参照できます。
 
-## 特徴
+## 現在の主な機能
 
-*   **多様なマージ手法:**
-    *   基本的な四則演算 (加算、減算、乗算、除算)
-    *   モデルの混合 (Mix, Average)
-    *   レイヤー絞り込みやエクスポート向けの Passthrough
-    *   テンソルの連結 (Concatenation)
-    *   最大/最小プーリング (MaxPool, MinPool)
-    *   幾何平均 (GeometricMean)
-    *   標準偏差を考慮した減算 (StdSub)
-    *   モデルの幅を広げる WidenMerge
-    *   複素数を用いたマージ (ComplexAdd, ComplexAngleMerge)
-    *   量子もつれに触発された計算に基づくマージ (QEICAdd, QeicMix, QeicSub)
-*   **柔軟な設定:**
-    *   YAML 形式の設定ファイルを使用して、マージプロセスを詳細に制御できます。
-    *   複数のモデルマージ設定を単一のファイルで管理できます。
-    *   モデル固有の設定 (キー変換、レイヤー挿入) を定義できます。
-    *   レイヤーごとの velocity を設定できます。
-    *   マージするレイヤーを範囲や名前で指定できます。
-    *   サイズの異なるレイヤーの処理方法を選択できます (スキップまたは共通部分のみ使用)。
-*   **LoRA サポート:**
-    *   LoRA (Low-Rank Adaptation) モデルを自動的にマージできます。
-*   **レイヤー削除:**
-    *   `drop_layers` で指定したレイヤーを出力モデルの `state_dict` から除去できます。
-*   **詳細なログ出力:**
-    *   `rich` ライブラリを使用した、視覚的にわかりやすいログ出力を提供します。
-*   **拡張性:**
-    *   モジュール構造により、新しいマージ手法や前処理/後処理オプションを簡単に追加できます。
+- 必須の `models` セクションによる YAML 駆動の複数ステップマージ。
+- Hugging Face のモデル ID / ディレクトリ、`*.safetensors`、`*.pth`、`*.bin`、Ninja Merger の `*.difftensors` 入力。
+- `target` に既存モデルを指定したフルモデル出力。
+- `target: null` / `target: none` による `*.difftensors` 疎ベクトル出力。
+- `left`、`right`、`target` で前ステップ結果を参照する `recurrent`。
+- レイヤーの include / exclude / drop、レイヤー一覧 dump、サイズ不一致時の処理。
+- prefix / regex によるレイヤー別 `velocity` / `post_velocity`。
+- 四則演算、`passthrough`、`none`、Widen、angle / complex、QEIC 系演算。`complex_mix` はレジストリにありますが未実装です。
+- `rich` による進捗表示、ステップ別サマリー、実行レシピの保存。
 
 ## インストール
 
+`pyproject.toml` では Python `>=3.13` を要求しています。
+
 ```bash
 git clone https://github.com/Local-novel-llm-project/Ninja-merger.git
-cd ninja-merger
+cd Ninja-merger
+uv sync
+```
+
+`uv` を使わない場合は、依存関係を直接入れます。
+
+```bash
 pip install -r requirements.txt
 ```
 
-## 使い方
+## 最短例
 
-1.  **設定ファイルの作成:** `config.yaml` という名前の YAML ファイルを作成し、マージするモデル、マージ手法、その他のオプションを指定します。
-2.  **コマンドの実行:** 以下のコマンドを実行して、モデルをマージします。
+フルモデルとして保存したい場合は、`target` に既存モデルを指定します。`post_operation` の既定値は `add` なので、マージ結果そのものを対象モデルの各レイヤーへ入れたい場合は `post_operation: none` を明示します。
 
-```bash
-python main.py -c config.yaml -o merged_models
-```
-## 対応フォーマット
-- `*.safetensors`
-- AutomodelForCausalLM (HuggingFace)
-
-## 設定ファイルの例
 ```yaml
 models:
-- name: "model_add"
-  left: "path/to/model1"
-  right: "path/to/model2"
-  operation: "add"
-- name: "model_mix_recurrent"
-  left: "model_add"  # result of the previous merge operation
-  right: "path/to/model3"
-  operation: "mix"
-  velocity: 0.5
-- name: "model_passthrough"
-  left: "path/to/model4"
-  operation: "passthrough"
-  drop_layers:
-    - "model.layers.24"
-    - "lm_head"
-
+  - name: mix-full-model
+    target: path/to/target-model
+    left: path/to/base-model
+    right: path/to/tuned-model
+    operation: mix
+    velocity: 0.35
+    post_operation: none
 ```
 
-## コマンドライン引数
-```
-usage: main.py [-h] [-c CONFIG] [-o OUT_DIR] [-n] [-dm MERGE_MODELS_DEVICE] [-dt TARGET_MODEL_DEVICE] [-t TORCH_DTYPE] [-r RECURRENT_MODE] [-d] [-l]
-               [--dump_layers] [--include_layers INCLUDE_LAYERS] [--exclude_layers EXCLUDE_LAYERS]
+実行例:
 
-Merge models
-
-optional arguments:
-  -h, --help            show this help message and exit
-  -c CONFIG, --config CONFIG
-                        Path to the JSON configuration file
-  -o OUT_DIR, --out_dir OUT_DIR
-                        Directory to save the merged model
-  -n, --skip_layernorm  Skip layernorm during merging
-  -dm MERGE_MODELS_DEVICE, --merge_models_device MERGE_MODELS_DEVICE
-                        Device for merging models
-  -dt TARGET_MODEL_DEVICE, --target_model_device TARGET_MODEL_DEVICE
-                        Device for the target model
-  -t TORCH_DTYPE, --torch_dtype TORCH_DTYPE
-                        Torch data type
-  -r RECURRENT_MODE, --recurrent_mode RECURRENT_MODE
-                        use target recurrent mode
-  -d, --dry_run         Dump processed layer infos without merging
-  -l, --save_only_last_model
-                        Only last model saved
-  --dump_layers         Dump model layers to a file instead of merging
-  --include_layers INCLUDE_LAYERS
-                        Comma-separated list of layers to include
-  --exclude_layers EXCLUDE_LAYERS
-                        Comma-separated list of layers to exclude
+```bash
+python main.py -c config.yaml -o merged_models --merge-models-device cuda:0 --target-model-device cuda:0 --torch-dtype bfloat16
 ```
 
-## 貢献
+フルモデルではなく疎なベクトルを作る場合は `target: null` を使います。Ninja Merger は最初の `left` モデルをメモリ上のレイヤー元として使い、非ゼロのテンソルだけを `merged_models/vector/*.difftensors` に保存します。トークナイザーやフルモデルディレクトリは保存しません。`post_operation` はこの場合も既定で `add` なので、`left - right` のような素直な差分を作る例では `post_operation: none` を明示します。
 
-バグ報告、機能リクエスト、プルリクエストは大歓迎です。
+```yaml
+models:
+  - name: delta-vector
+    target: null
+    left: path/to/base-model
+    right: path/to/tuned-model
+    operation: sub
+    post_operation: none
+```
+
+## CLI の基本
+
+```bash
+python main.py -c model_config.yaml -o merged_models
+```
+
+よく使うオプション:
+
+| オプション | 内容 |
+| --- | --- |
+| `-c`, `--config` | YAML レシピ。既定値は `model_config.yaml`。 |
+| `-o`, `--out-dir` | 出力先ディレクトリ。既定値は `./merged_models`。 |
+| `-dm`, `--merge-models-device` | `left` / `right` モデルのロード先。既定値は `cpu`。 |
+| `-dt`, `--target-model-device` | 明示的な `target` モデルのロード先。既定値は `cpu`。 |
+| `-t`, `--torch-dtype` | `float16`、`bfloat16`、`float32`、`float64`。 |
+| `--no-recurrent-mode` | 前ステップ結果の再利用を無効化。 |
+| `-l`, `--save-only-last-model` | 中間結果をメモリ上に保持し、最後のステップだけ保存。 |
+| `-d`, `--dry-run` | 出力物を書かずにマージ経路だけ実行。 |
+| `--dump-layers` | マージせずレイヤー名を出力。`--dry-run` とは併用不可。 |
+| `--include-layers`, `--exclude-layers` | CLI 側のレイヤーフィルタ。設定ファイル側より優先。 |
+
+全体は [docs/cli.md](docs/cli.md) にまとめています。
+
+## ドキュメント
+
+- [docs/README.md](docs/README.md): ドキュメントの入口。
+- [docs/configuration.md](docs/configuration.md): YAML スキーマ、既定値、例。
+- [docs/operations.md](docs/operations.md): マージ演算と補助処理。
+- [docs/output-artifacts.md](docs/output-artifacts.md): 入力形式、出力形式、保存先。
+- [docs/cli.md](docs/cli.md): コマンドライン仕様。
+- [docs/examples-and-tools.md](docs/examples-and-tools.md): 例と補助ツールの位置づけ。
+
+## 開発
+
+```bash
+pytest
+```
+
+テストではパーサー、設定正規化、演算レジストリ、レイヤー処理、疎ベクトル、主要演算の参照結果を確認しています。
 
 ## ライセンス
 

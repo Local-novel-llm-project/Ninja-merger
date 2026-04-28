@@ -1,5 +1,5 @@
 models:
-  # === Recipe A: EMA smoothing over last 5 ===
+  # === レシピ A: 直近 5 件を EMA 風に平滑化 ===
   - name: "ema_last5_step1"
     left: ["e:/Ninja-merger/models/LoRA/shironecotte/shironecotte_v5-000026.safetensors"]
     right: ["e:/Ninja-merger/models/LoRA/shironecotte/shironecotte_v5-000027.safetensors"]
@@ -36,7 +36,7 @@ models:
     normalization: "quantile_match"
     unmatch_size_layer_op: "skip"
 
-  # === Recipe B: Trend-sharpen boost from earlier ===
+  # === レシピ B: 過去ステップとの差分で傾向を強調 ===
   - name: "momentum_boost_from_24"
     left: ["e:/Ninja-merger/models/LoRA/shironecotte/shironecotte_v5-000030.safetensors"]
     right: ["e:/Ninja-merger/models/LoRA/shironecotte/shironecotte_v5-000024.safetensors"]
