@@ -27,6 +27,11 @@ def Avg(v, base_state_dict, sub_state_dict, velocity):
     return ((base_state_dict + sub_state_dict) * 0.5).to(v)
 
 
+def Passthrough(v, base_state_dict, sub_state_dict, velocity):
+    # base_state_dict をそのまま返す。sub_state_dict と velocity は使わない。
+    return base_state_dict.detach().clone().to(v)
+
+
 def Concatenation(v, base_state_dict, sub_state_dict, velocity):
     return torch.cat((base_state_dict, sub_state_dict), dim=0)
 

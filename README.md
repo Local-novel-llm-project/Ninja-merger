@@ -12,6 +12,7 @@ Ninja Merger is a tool for merging PyTorch-based deep learning models, particula
 *   **Diverse Merging Methods:**
     *   Basic arithmetic operations (addition, subtraction, multiplication, division)
     *   Model mixing (Mix, Average)
+    *   Passthrough copying for layer filtering/export workflows
     *   Tensor concatenation (Concatenation)
     *   Max/Min pooling (MaxPool, MinPool)
     *   Geometric mean (GeometricMean)
@@ -28,6 +29,8 @@ Ninja Merger is a tool for merging PyTorch-based deep learning models, particula
     *   Offers options for handling layers with mismatched sizes (skip or use only the common part).
 *   **LoRA Support:**
     *   Automatically merges LoRA (Low-Rank Adaptation) models.
+*   **Layer Removal:**
+    *   `drop_layers` can remove selected layers from the output model `state_dict`.
 *   **Detailed Logging:**
     *   Provides visually appealing and informative log output using the `rich` library.
 *   **Extensibility:**
@@ -68,6 +71,12 @@ models:
   right: "path/to/model3"
   operation: "mix"
   velocity: 0.5
+- name: "model_passthrough"
+  left: "path/to/model4"
+  operation: "passthrough"
+  drop_layers:
+    - "model.layers.24"
+    - "lm_head"
 ```
 
 ## Command-Line Arguments
@@ -110,4 +119,3 @@ Bug reports, feature requests, and pull requests are welcome.
 ## License
 
 Apache License 2.0
-

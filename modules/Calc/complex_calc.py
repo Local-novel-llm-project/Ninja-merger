@@ -3,19 +3,26 @@ import torch
 from rich import print
 
 
+def _complex_real_dtype(dtype):
+    if dtype in (torch.float16, torch.float32, torch.float64):
+        return dtype
+    return torch.float32
+
+
 def _to_complex_tensor(val, device, dtype):
     """
     数値または複素数を複素数テンソルに変換するヘルパー関数
     """
+    real_dtype = _complex_real_dtype(dtype)
     if isinstance(val, complex):
         return torch.complex(
-            torch.tensor(val.real, device=device, dtype=dtype),
-            torch.tensor(val.imag, device=device, dtype=dtype),
+            torch.tensor(val.real, device=device, dtype=real_dtype),
+            torch.tensor(val.imag, device=device, dtype=real_dtype),
         )
     else:
         return torch.complex(
-            torch.tensor(float(val), device=device, dtype=dtype),
-            torch.tensor(0.0, device=device, dtype=dtype),
+            torch.tensor(float(val), device=device, dtype=real_dtype),
+            torch.tensor(0.0, device=device, dtype=real_dtype),
         )
 
 

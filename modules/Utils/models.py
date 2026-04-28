@@ -1,9 +1,21 @@
 # modules/Utils/models.py
+import copy
 import re
+from dataclasses import dataclass
+from typing import Any
 
 import torch
-from peft import PeftModel
 from torch import nn
+
+from .merge_types import MergeRequest
+
+
+@dataclass
+class PreparedModels:
+    base_models: list[nn.Module]
+    sub_models: list[nn.Module]
+    velocity: Any
+    post_velocity: Any
 
 
 class DummyModel(nn.Module):
@@ -58,8 +70,86 @@ class DummyConfig:
     def to_dict(self):
         return self.__dict__
 
+
+def _config_to_plain_dict(config):
+    if config is None:
+        return {}
+    if isinstance(config, dict):
+        return copy.deepcopy(config)
+    if hasattr(config, "to_dict"):
+        return copy.deepcopy(config.to_dict())
+    return copy.deepcopy(getattr(config, "__dict__", {}))
+
+
+def _set_config_attr(config, key, value):
+    setattr(config, key, value)
+    if hasattr(config, "__dict__"):
+        config.__dict__[key] = value
+
+
+def _remove_config_attr(config, key):
+    if hasattr(config, "__dict__"):
+        config.__dict__.pop(key, None)
+    if hasattr(config, key):
+        try:
+            delattr(config, key)
+        except (AttributeError, TypeError):
+            pass
+
+
+def prune_config_for_dropped_layers(config, state_dict):
+    """drop_layers の結果に応じて config から不要な multimodal 設定を除去する。"""
+    if config is None or state_dict is None:
+        return
+
+    state_keys = list(state_dict.keys())
+    has_text = any(k.startswith("model.language_model.") for k in state_keys)
+    has_audio = any(
+        k.startswith(("model.audio_tower.", "model.embed_audio.")) for k in state_keys
+    )
+    has_vision = any(
+        k.startswith(("model.vision_tower.", "model.embed_vision.")) for k in state_keys
+    )
+
+    if not has_audio:
+        for key in [
+            "audio_config",
+            "audio_token_id",
+            "boa_token_id",
+            "eoa_token_id",
+            "eoa_token_index",
+        ]:
+            _remove_config_attr(config, key)
+
+    if not has_vision:
+        for key in [
+            "vision_config",
+            "image_token_id",
+            "video_token_id",
+            "boi_token_id",
+            "eoi_token_id",
+            "vision_soft_tokens_per_image",
+        ]:
+            _remove_config_attr(config, key)
+
+    if has_text and not has_audio and not has_vision and hasattr(config, "text_config"):
+        text_dict = _config_to_plain_dict(getattr(config, "text_config"))
+        for key, value in text_dict.items():
+            _set_config_attr(config, key, value)
+
+        _remove_config_attr(config, "text_config")
+        _set_config_attr(config, "architectures", ["Gemma4ForCausalLM"])
+        _set_config_attr(
+            config,
+            "model_type",
+            text_dict.get("model_type", getattr(config, "model_type", "gemma4_text")),
+        )
+
+
 def merge_lora(model, lora_name, device):
     if lora_name is not None:
+        from peft import PeftModel
+
         device = "cuda" if torch.cuda.is_available() else "cpu"
         print("[green]start merging LoRA[/green]")
         model = PeftModel.from_pretrained(model, lora_name, device=device)
@@ -135,110 +225,107 @@ def prepare_model_metadata(model_dict):
         model_dict (dict): モデルの設定 (config.yaml から読み込まれたもの)。
 
     Returns:
-        dict: 必要なメタデータを含む辞書。
+        MergeRequest: 必要なメタデータを含む構造体。
     """
-    metadata = {}
-
-    # モデル名 (左右)
-    metadata["base_model_names"] = model_dict["left"]
-    metadata["sub_model_names"] = model_dict["right"]
-
-    # target 関連
-    metadata["target_value"] = model_dict.get("target")
-    metadata["target_value_scalar"] = (
-        metadata["target_value"][0]
-        if isinstance(metadata["target_value"], list)
-        and len(metadata["target_value"]) == 1
-        else metadata["target_value"]
+    if isinstance(model_dict, MergeRequest):
+        return model_dict
+    raise TypeError(
+        "prepare_model_metadata expects a MergeRequest. "
+        "Config normalization should happen in load_config()."
     )
-    metadata["is_llava_next"] = False  # デフォルト値
-    if isinstance(metadata["target_value_scalar"], str) and metadata[
-        "target_value_scalar"
-    ].lower() in ["llava", "vlm", "llava-next"]:
-        metadata["is_llava_next"] = True
-
-    # マージ設定
-    metadata["unmatch_size_layer_op"] = model_dict.get("unmatch_size_layer_op", "skip")
-    metadata["include_layers"] = model_dict.get("include_layers", None)
-    metadata["exclude_layers"] = model_dict.get("exclude_layers", None)
-    metadata["drop_layers"] = model_dict.get("drop_layers", None)
-    metadata["operation"] = model_dict.get("operation", "sub")
-    metadata["post_operation"] = model_dict.get("post_operation", "add")
-    metadata["preprocess"] = model_dict.get("preprocess", "none")
-    metadata["post_preprocess"] = model_dict.get("post_preprocess", "none")
-    metadata["post_velocity"] = model_dict.get("post_velocity", 1.0)
-    metadata["normalization"] = model_dict.get("normalization", "none")
-    metadata["force_merge_single"] = model_dict.get("force_merge_single", False)
-    metadata["v2s_empty_default"] = model_dict.get("v2s_empty_default", "v1")
-    metadata["v2s_single_default"] = model_dict.get("v2s_single_default", "auto")
-    metadata["use_scaling"] = model_dict.get("use_scaling")
-
-    # velocities, post_velocities は load_and_prepare_models で処理
-    # model_config も同様
-
-    return metadata
 
 
-def load_and_prepare_models(model_dict, merge_models_device, torch_dtype, recurrent_model=None):
+def _load_configured_model(model_name, request, merge_models_device, torch_dtype):
+    from ..Utils.loaders import load_model
+
+    model = load_model(
+        model_name,
+        merge_models_device,
+        torch_dtype,
+        diff_mode="delta",
+    )
+    model = merge_lora(model, None, merge_models_device)
+    model_config = request.model_config.get(model_name, {})
+    return apply_transformations(model, model_config)
+
+
+def _resolve_model_sequence(
+    model_names, request, merge_models_device, torch_dtype, recurrent_model=None
+):
+    models = []
+    for model_name in model_names:
+        if model_name.startswith("recurrent"):
+            if recurrent_model is None:
+                raise ValueError(
+                    "Config references 'recurrent', but no previous merge result is available"
+                )
+            models.append(recurrent_model)
+            continue
+        models.append(
+            _load_configured_model(
+                model_name, request, merge_models_device, torch_dtype
+            )
+        )
+    return models
+
+
+def load_and_prepare_models(request, merge_models_device, torch_dtype, recurrent_model=None):
     """
     モデルをロードし、マージのための準備を行う。
 
     Args:
-        model_dict (dict): モデルの設定 (config.yaml から読み込まれたもの)。
+        request (MergeRequest): 正規化済みのマージ設定。
         merge_models_device (str): モデルをロードするデバイス。
         torch_dtype (torch.dtype): モデルのデータ型。
         recurrent_model (torch.nn.Module, optional): 前のマージ結果のモデル. Defaults to None.
 
     Returns:
-        tuple: (base_models, sub_models, velocity, post_velocity) のタプル。
-            base_models (list): ベースモデルのリスト。
-            sub_models (list): サブモデルのリスト。
-            velocity (dict or float or complex): レイヤーごとのvelocity(dict)または、モデル全体に適用されるvelocity(float, complex)。
-            post_velocity (dict or float): レイヤーごとのpost_velocity(dict) または、モデル全体に適用されるpost_velocity(float)。
+        PreparedModels: ベース/サブモデルと速度設定を保持する構造体。
     """
     from ..Utils.layers import prepare_post_velocities, prepare_velocities
-    from ..Utils.loaders import load_model
-    from ..Utils.models import apply_transformations, merge_lora
 
-    base_models = []
-    for model_name in model_dict["left"]:
-        if model_name.startswith("recurrent"):
-            if recurrent_model is not None:
-                base_models.append(recurrent_model)
-        else:
-            model = load_model(model_name, merge_models_device, torch_dtype)
-            model = merge_lora(model, None, merge_models_device)
-            model_config = model_dict.get("model_config", {}).get(model_name, {})
-            model = apply_transformations(model, model_config)
-            base_models.append(model)
+    request = prepare_model_metadata(request)
+    right_model_names = request.sub_model_names
+    if request.operation not in {"passthrough", "none"} and not right_model_names:
+        raise ValueError(
+            "right models are required unless operation is 'passthrough' or 'none'"
+        )
 
-    sub_models = []
-    for model_name in model_dict["right"]:
-        if model_name.startswith("recurrent"):
-            if recurrent_model is not None:
-                sub_models.append(recurrent_model)
-        else:
-            model = load_model(model_name, merge_models_device, torch_dtype)
-            model = merge_lora(model, None, merge_models_device)
-            model_config = model_dict.get("model_config", {}).get(model_name, {})
-            model = apply_transformations(model, model_config)
-            sub_models.append(model)
+    base_models = _resolve_model_sequence(
+        request.base_model_names,
+        request,
+        merge_models_device,
+        torch_dtype,
+        recurrent_model=recurrent_model,
+    )
+    sub_models = _resolve_model_sequence(
+        right_model_names,
+        request,
+        merge_models_device,
+        torch_dtype,
+        recurrent_model=recurrent_model,
+    )
 
-    velocities_config = model_dict.get("velocities", None)
+    velocities_config = request.velocities
     if velocities_config:
         if base_models:
             velocity = prepare_velocities(velocities_config, base_models[0].state_dict())
         else:
             velocity = None
     else:
-        velocity = model_dict.get("velocity")
+        velocity = request.velocity
 
-    post_velocities_config = model_dict.get("post_velocities", None)
+    post_velocities_config = request.post_velocities
     if post_velocities_config:
         post_velocity = prepare_post_velocities(
             post_velocities_config, base_models[0].state_dict()
         )
     else:
-        post_velocity = model_dict.get("post_velocity", 1.0)
+        post_velocity = request.post_velocity
 
-    return base_models, sub_models, velocity, post_velocity
+    return PreparedModels(
+        base_models=base_models,
+        sub_models=sub_models,
+        velocity=velocity,
+        post_velocity=post_velocity,
+    )

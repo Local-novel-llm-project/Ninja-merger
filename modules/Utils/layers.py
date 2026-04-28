@@ -11,7 +11,17 @@ def _to_layer_tokens(layers_spec) -> list[str]:
         return []
 
     if isinstance(layers_spec, str):
-        raw_items = layers_spec.split(",")
+        if "," in layers_spec:
+            raw_items = layers_spec.split(",")
+        else:
+            whitespace_items = layers_spec.split()
+            if len(whitespace_items) > 1 and not any(
+                item == "-" or re.fullmatch(r"-?\d+", item)
+                for item in whitespace_items
+            ):
+                raw_items = whitespace_items
+            else:
+                raw_items = [layers_spec]
     elif isinstance(layers_spec, Iterable):
         raw_items = []
         for item in layers_spec:
@@ -126,6 +136,9 @@ def get_skip_layers(
 ):
     skip_layers = []
 
+    def _is_sparse_zero_missing(model) -> bool:
+        return getattr(model, "_ninja_sparse_zero_missing", False)
+
     if target_model is None:
         base_state_dicts = [b.state_dict() for b in base_models]
         target_state_dict = base_state_dicts[0]  # 便宜上、最初の base model を使う
@@ -157,8 +170,10 @@ def get_skip_layers(
         )
 
         missing = False
-        for sub_state_dict in sub_state_dicts:
+        for sub_model, sub_state_dict in zip(sub_models, sub_state_dicts):
             if _get_tensor_by_key(sub_state_dict, lookup_key, target_key) is None:
+                if _is_sparse_zero_missing(sub_model):
+                    continue
                 print(f"[yellow] Right key not found: {lookup_key}, skip...[/yellow]")
                 skip_layers.append(lookup_key)
                 missing = True
@@ -166,8 +181,10 @@ def get_skip_layers(
         if missing:
             continue
 
-        for base_state_dict in base_state_dicts:
+        for base_model, base_state_dict in zip(base_models, base_state_dicts):
             if _get_tensor_by_key(base_state_dict, lookup_key, target_key) is None:
+                if _is_sparse_zero_missing(base_model):
+                    continue
                 print(f"[yellow] Base key not found: {lookup_key}, skip...[/yellow]")
                 skip_layers.append(lookup_key)
                 missing = True
@@ -221,8 +238,10 @@ def get_skip_layers(
             continue
 
         mismatch = False
-        for base_state_dict in base_state_dicts:
+        for base_model, base_state_dict in zip(base_models, base_state_dicts):
             base_tensor = _get_tensor_by_key(base_state_dict, lookup_key, target_key)
+            if base_tensor is None and _is_sparse_zero_missing(base_model):
+                continue
             if (
                 base_tensor is None
                 or not hasattr(base_tensor, "shape")
@@ -237,8 +256,10 @@ def get_skip_layers(
         if mismatch:
             continue
 
-        for sub_state_dict in sub_state_dicts:
+        for sub_model, sub_state_dict in zip(sub_models, sub_state_dicts):
             sub_tensor = _get_tensor_by_key(sub_state_dict, lookup_key, target_key)
+            if sub_tensor is None and _is_sparse_zero_missing(sub_model):
+                continue
             if (
                 sub_tensor is None
                 or not hasattr(sub_tensor, "shape")

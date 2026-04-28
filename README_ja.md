@@ -11,6 +11,7 @@ Ninja Merger は、PyTorch ベースの深層学習モデル (特に Transformer
 *   **多様なマージ手法:**
     *   基本的な四則演算 (加算、減算、乗算、除算)
     *   モデルの混合 (Mix, Average)
+    *   レイヤー絞り込みやエクスポート向けの Passthrough
     *   テンソルの連結 (Concatenation)
     *   最大/最小プーリング (MaxPool, MinPool)
     *   幾何平均 (GeometricMean)
@@ -27,6 +28,8 @@ Ninja Merger は、PyTorch ベースの深層学習モデル (特に Transformer
     *   サイズの異なるレイヤーの処理方法を選択できます (スキップまたは共通部分のみ使用)。
 *   **LoRA サポート:**
     *   LoRA (Low-Rank Adaptation) モデルを自動的にマージできます。
+*   **レイヤー削除:**
+    *   `drop_layers` で指定したレイヤーを出力モデルの `state_dict` から除去できます。
 *   **詳細なログ出力:**
     *   `rich` ライブラリを使用した、視覚的にわかりやすいログ出力を提供します。
 *   **拡張性:**
@@ -64,6 +67,12 @@ models:
   right: "path/to/model3"
   operation: "mix"
   velocity: 0.5
+- name: "model_passthrough"
+  left: "path/to/model4"
+  operation: "passthrough"
+  drop_layers:
+    - "model.layers.24"
+    - "lm_head"
 
 ```
 
@@ -106,4 +115,3 @@ optional arguments:
 ## ライセンス
 
 Apache License 2.0
-

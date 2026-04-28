@@ -1,12 +1,31 @@
-import glob
 import hashlib
 import os
-import re
 from datetime import datetime
 from pathlib import Path
+from typing import Iterable
 
 import torch
 import yaml
+
+from .operation_registry import get_operation_short_name
+
+
+def _config_get(config_or_request, key, default=None):
+    if config_or_request is None:
+        return default
+    if hasattr(config_or_request, "get"):
+        return config_or_request.get(key, default)
+    return default
+
+
+def _recipe_payload(config_or_request):
+    if config_or_request is None:
+        return {}
+    if hasattr(config_or_request, "to_dict"):
+        return config_or_request.to_dict()
+    if isinstance(config_or_request, dict):
+        return config_or_request
+    return {}
 
 
 def get_savename(path):
@@ -16,6 +35,110 @@ def get_savename(path):
         path_parts = path_parts[1:]
 
     return "-".join(path_parts)
+
+
+def _shorten_model_name(name):
+    short_name = (
+        os.path.basename(name)
+        .replace(".safetensors", "")
+        .replace(".pth", "")
+        .replace(".bin", "")
+    )
+    if len(short_name) > 20:
+        return short_name[:8] + "..." + short_name[-8:]
+    return short_name
+
+
+def _default_merge_label(base, sub, model_dict):
+    left_model_name = _shorten_model_name(base[0])
+    right_model_name = _shorten_model_name(sub[0]) if sub else "none"
+    model_names = (
+        f"{left_model_name}_and_{right_model_name}" if sub else left_model_name
+    )
+    operation = get_operation_short_name(_config_get(model_dict, "operation", "merge"))
+    return f"{model_names}_{operation}"
+
+
+def _build_base_name(base, sub, model_dict):
+    config_name = _config_get(model_dict, "name")
+    base_label = config_name or _default_merge_label(base, sub, model_dict)
+    if len(base_label) <= 100:
+        return base_label
+
+    hash_value = hashlib.sha256(base_label.encode()).hexdigest()[:8]
+    return hash_value
+
+
+def _resolve_output_base_dir(target, out_dir):
+    if target == "lora":
+        return os.path.join(out_dir, "lora")
+    if target == "recurrent":
+        return os.path.join(out_dir, "recurrent")
+    if target is None or target == "null":
+        return os.path.join(out_dir, "vector")
+
+    target_name = os.path.basename(target[0] if isinstance(target, list) else target)
+    return os.path.join(out_dir, target_name)
+
+
+def _resolve_parent_dir(target, out_dir):
+    base_dir_path = _resolve_output_base_dir(target, out_dir)
+    os.makedirs(base_dir_path, exist_ok=True)
+    return base_dir_path
+
+
+def _resolve_candidate_save_stem(base, sub, target, out_dir, model_dict):
+    parent_dir = _resolve_parent_dir(target, out_dir)
+    base_name = _build_base_name(base, sub, model_dict)
+    return os.path.join(parent_dir, base_name)
+
+
+def _resolve_unique_save_stem(candidate_stem):
+    if not output_artifact_exists(candidate_stem):
+        return candidate_stem
+
+    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    candidate_with_timestamp = f"{candidate_stem}_{timestamp}"
+    if not output_artifact_exists(candidate_with_timestamp):
+        return candidate_with_timestamp
+
+    suffix = 2
+    while True:
+        candidate_with_suffix = f"{candidate_stem}_{timestamp}_{suffix:02}"
+        if not output_artifact_exists(candidate_with_suffix):
+            return candidate_with_suffix
+        suffix += 1
+
+
+def _write_recipe(save_name, basename, model_dict):
+    recipe_payload = _recipe_payload(model_dict)
+    if not recipe_payload:
+        return
+
+    recipe_dir = os.path.dirname(save_name)
+    os.makedirs(recipe_dir, exist_ok=True)
+    recipe_path = os.path.join(recipe_dir, basename + "_recipe.yaml")
+
+    try:
+        with open(recipe_path, "w", encoding="utf-8") as f:
+            yaml.dump(recipe_payload, f, default_flow_style=False, sort_keys=False)
+    except Exception as error:
+        print(f"Warning: Failed to save recipe: {error}")
+
+
+def write_recipe_file(save_stem, model_dict):
+    basename = os.path.basename(save_stem)
+    _write_recipe(save_stem, basename, model_dict)
+
+
+def output_artifact_exists(save_stem):
+    if os.path.isdir(save_stem):
+        return True
+    if os.path.exists(f"{save_stem}.pth"):
+        return True
+    if os.path.exists(f"{save_stem}.difftensors"):
+        return True
+    return os.path.exists(f"{save_stem}_layers.txt")
 
 
 def define_savename(base, sub, target, out_dir, index, model_dict=None):
@@ -34,126 +157,9 @@ def define_savename(base, sub, target, out_dir, index, model_dict=None):
         str: 保存先のパス。
     """
 
-    # 1. 設定ファイルから name キーの値を取得 (存在する場合)
-    config_name = model_dict.get("name")
-
-    # 2. name キーが存在しない場合は、model_names と operation を生成
-    if not config_name:
-
-        def shorten_model_name(name):
-            name = (
-                os.path.basename(name)
-                .replace(".safetensors", "")
-                .replace(".pth", "")
-                .replace(".bin", "")
-            )
-            if len(name) > 20:  # 例: 20 文字を超える場合は短縮
-                return name[:8] + "..." + name[-8:]
-            return name
-
-        left_model_name = shorten_model_name(base[0])  # 最初のモデル名
-        right_model_name = shorten_model_name(sub[0])  # 最初のモデル名
-
-        model_names = f"{left_model_name}_and_{right_model_name}"
-
-        operation_map = {  # 操作名と短い名前の対応
-            "add": "add",
-            "sub": "sub",
-            "mul": "mul",
-            "div": "div",
-            "mix": "mix",
-            "avg": "avg",
-            "concat": "concat",
-            "maxpool": "maxpool",
-            "minpool": "minpool",
-            "geometric_mean": "gmean",
-            "std_sub": "stdsub",
-            "widen": "widen",
-            "complexadd": "cadd",
-            "angle_merge": "angm",
-            "complex_angle_merge": "cam",
-            "qeic_add": "qadd",
-            "qeic_mix": "qmix",
-            "qeic_sub": "qsub",
-        }
-        operation = operation_map.get(
-            model_dict.get("operation", "merge"), "unk"
-        )  # 未知の操作は "unk"
-
-    # 3. タイムスタンプを生成
-    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-
-    # 4. ファイル名を生成
-    if config_name:
-        basename = f"{config_name}_{timestamp}"
-    else:
-        basename = f"{model_names}_{operation}_{timestamp}"
-
-    # 5. ファイル名が長すぎる場合は、ハッシュ化 (モデル名と操作部分のみ)
-    if len(basename) > 100:
-        if config_name:  # config_nameがある場合は、config_nameをハッシュ化
-            hash_value = hashlib.sha256(config_name.encode()).hexdigest()[:8]
-            basename = f"{hash_value}_{timestamp}"
-        else:  # config_name がない場合は、model_names と operationをハッシュ化
-            hash_value = hashlib.sha256((model_names + operation).encode()).hexdigest()[
-                :8
-            ]
-            basename = f"{hash_value}_{timestamp}"
-
-    # 6. 連番を追加してファイル名の衝突を回避
-    if target == "lora":
-        dir_path = os.path.join(out_dir, "lora")
-    elif target == "recurrent":
-        dir_path = os.path.join(out_dir, "recurrent")
-    elif target is None or target == "null":
-        dir_path = os.path.join(out_dir, "vector")
-    else:
-        target_name = os.path.basename(target[0] if isinstance(target, list) else target)
-        dir_path = os.path.join(out_dir, target_name)
-
-    os.makedirs(dir_path, exist_ok=True)  # ディレクトリが存在しない場合は作成
-
-    # 既存のファイル名とパターンマッチング
-    pattern = os.path.join(dir_path, basename + "*")
-    existing_files = glob.glob(pattern)
-    serial_number = 1
-
-    if existing_files:  # 同じファイル名が存在する場合は、連番をインクリメント
-        # 最大の連番 + 1 を取得
-        existing_numbers = [
-            int(re.search(r"_(\d+)(?:\.safetensors|\.yaml)$", f).group(1))
-            for f in existing_files
-            if re.search(r"_(\d+)(?:\.safetensors|\.yaml)$", f)
-        ]
-        if existing_numbers:
-            serial_number = max(existing_numbers) + 1
-
-    basename = f"{basename}_{serial_number:03}"  # 連番を付与
-
-    # 7. ディレクトリとファイル名を結合
-    if target == "lora":
-        save_name = os.path.join(dir_path, basename + ".safetensors")
-    elif target == "recurrent":
-        save_name = os.path.join(dir_path, basename + ".safetensors")
-    elif target is None or target == "null":
-        save_name = os.path.join(dir_path, basename + ".safetensors")
-    else:
-        target_name = os.path.basename(target[0] if isinstance(target, list) else target)
-        save_name = os.path.join(dir_path, basename + ".safetensors")
-
-    # 8. レシピを保存 (モデル設定を YAML 形式で保存)
-    if model_dict:
-        recipe_dir = os.path.dirname(save_name)
-        os.makedirs(recipe_dir, exist_ok=True)
-        recipe_path = os.path.join(recipe_dir, basename + "_recipe.yaml")  # 連番付き
-
-        try:
-            with open(recipe_path, "w", encoding="utf-8") as f:
-                yaml.dump(model_dict, f, default_flow_style=False, sort_keys=False)
-        except Exception as e:
-            print(f"Warning: Failed to save recipe: {e}")
-
-    return save_name
+    model_dict = model_dict or {}
+    candidate_stem = _resolve_candidate_save_stem(base, sub, target, out_dir, model_dict)
+    return _resolve_unique_save_stem(candidate_stem)
 
 
 def get_slice_to(t, indice):
@@ -193,13 +199,43 @@ def scale_tensor_inplace(tensor, threshold, scale_factor):
     return tensor
 
 
+def filter_state_dict_keys(state_dict, dropped_layers: Iterable[str] | None):
+    """指定されたキーを state_dict から取り除いたコピーを返す。"""
+    dropped = set(dropped_layers or [])
+    if not dropped:
+        return state_dict
+
+    filtered = type(state_dict)()
+    for key, value in state_dict.items():
+        if key not in dropped:
+            filtered[key] = value
+
+    metadata = getattr(state_dict, "_metadata", None)
+    if metadata is not None:
+        filtered._metadata = dict(metadata)
+
+    return filtered
+
+
 def prepare_tensor_slices(
     target_state_dict, key, base_models, sub_models, unmatch_size_layer_op, console
 ):
     """テンソルのスライスを準備するヘルパー関数。"""
     v = target_state_dict[key]
-    base_tensors = [b.state_dict()[key] for b in base_models if key in b.state_dict()]
-    sub_tensors = [s.state_dict()[key] for s in sub_models if key in s.state_dict()]
+
+    def _collect_model_tensors(models):
+        tensors = []
+        for model in models:
+            state_dict = model.state_dict()
+            if key in state_dict:
+                tensors.append(state_dict[key])
+                continue
+            if getattr(model, "_ninja_sparse_zero_missing", False):
+                tensors.append(torch.zeros_like(v))
+        return tensors
+
+    base_tensors = _collect_model_tensors(base_models)
+    sub_tensors = _collect_model_tensors(sub_models)
 
     if unmatch_size_layer_op == "only_common_range":
         base_same_ndim = [t for t in base_tensors if t.ndim == v.ndim]
@@ -229,17 +265,24 @@ def prepare_tensor_slices(
     return v, base_tensors, sub_tensors, min_size
 
 
+def _complex_real_dtype(dtype):
+    if dtype in (torch.float16, torch.float32, torch.float64):
+        return dtype
+    return torch.float32
+
+
 def to_complex_tensor(val, device, dtype):
     """
     数値または複素数を複素数テンソルに変換するヘルパー関数
     """
+    real_dtype = _complex_real_dtype(dtype)
     if isinstance(val, complex):
         return torch.complex(
-            torch.tensor(val.real, device=device, dtype=dtype),
-            torch.tensor(val.imag, device=device, dtype=dtype),
+            torch.tensor(val.real, device=device, dtype=real_dtype),
+            torch.tensor(val.imag, device=device, dtype=real_dtype),
         )
     else:
         return torch.complex(
-            torch.tensor(float(val), device=device, dtype=dtype),
-            torch.tensor(0.0, device=device, dtype=dtype),
+            torch.tensor(float(val), device=device, dtype=real_dtype),
+            torch.tensor(0.0, device=device, dtype=real_dtype),
         )

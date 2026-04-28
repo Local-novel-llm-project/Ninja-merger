@@ -16,3 +16,6 @@ dependencies = [
     "tqdm>=4.67.3",
     "transformers>=4.40.1",
 ]
+
+[tool.uv.sources]
+transformers = { git = "https://github.com/huggingface/transformers.git", rev = "main" }

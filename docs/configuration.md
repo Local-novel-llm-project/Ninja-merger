@@ -40,7 +40,7 @@ key2:
 | :----------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :------------------------------------------------------------------- | :--: | :----------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `name`             | (オプション) マージ設定の名前。ファイル名の一部として使用されます。指定しない場合は、モデル名と操作名から自動生成されます。                                                                                                                                                                                                    | str                                                                  |  ×  |              | `my_merge_config`                                                                                                                                                                                                                                               |
 | `left`             | マージするモデルのリスト (左側)。少なくとも1つのモデルを指定する必要があります。                                                                                                                                                                                                                             | list[str]                                                            |  ○  |              | `["model1.safetensors", "model2.safetensors"]`                                                                                                                                                                                                               |
-| `right`            | マージするモデルのリスト (右側)。少なくとも1つのモデルを指定する必要があります。                                                                                                                                                                                                                             | list[str]                                                            |  ○  |              | `["model3.safetensors"]`                                                                                                                                                                                                                                  |
+| `right`            | マージするモデルのリスト (右側)。通常は少なくとも1つ必要ですが、`operation: passthrough` の場合は省略または空リストを指定できます。                                                                                                                                                                                                                             | list[str]                                                            |  △  | `[]`         | `["model3.safetensors"]`, `[]`                                                                                                                                                                                                                                  |
 | `target`           | マージ結果の出力先。`null` (新しいモデルを作成)、`"recurrent"` (前回のマージ結果を上書き)、または既存のモデルのパスを指定できます。                                                                                                                                                                                 | str or null                                                          |  ○  |              | `null`, `"recurrent"`, `"model4.safetensors"`                                                                                                                                                                                                            |
 | `operation`        | マージ方法を指定します。利用可能な値は以下の表を参照してください。                                                                                                                                                                                                                                         | str                                                                  |  ○  |              | `add`, `sub`, `complex_angle_merge`                                                                                                                                                                                                                   |
 | `velocities`       | (オプション) レイヤーごとの `velocity` を指定します。辞書形式で、キーにレイヤー名 (またはパターン)、値に `velocity` を指定します。`DEFAULT` キーでデフォルト値を指定できます。                                                                                                                                     | dict[str, float or complex or dict]                                |  ×  | `{}`         | `{"model.layers.0.": 0.1, "model.layers.1.": 0.2, "DEFAULT": 0.5, "model.layers.(\d+).": {"type": "regex", "value": "0.05 * int(match.group(1))"}}`                                                                                                    |
@@ -54,7 +54,7 @@ key2:
 | `normalization`   | 正規化                                      | str                                                                                           | ×    | `"none"`     | `"none"`, `"norm_std_mean"`                                                                                                                                    |
 | `include_layers` | (オプション) マージに含めるレイヤーを指定します。カンマ区切りの文字列、またはリストで指定します。                                                                          | str or list[str]                                  | ×   |  `None`     | `"model.layers.0,model.layers.1"`, `["model.layers.0", "model.layers.1"]`                                                                |
 | `exclude_layers` | (オプション) マージから除外するレイヤーを指定します。`include_layers` と同様の形式で指定します。                                                                      | str or list[str]                                   | ×   | `None`      | `"model.layers.2,model.layers.3"`                                                                                                                       |
-| `drop_layers`    | (オプション) マージから削除するレイヤーを指定します。`include_layers` と同様の形式で指定します。                                                                    | str or list[str]                                  | ×    | `None`      | `"model.layers.4"`                                                                                                                                  |
+| `drop_layers`    | (オプション) 出力モデルから削除するレイヤーを指定します。指定したレイヤーはマージ処理対象から外れ、保存結果の `state_dict` からも除去されます。`include_layers` と同様の形式で指定します。                                                                    | str or list[str]                                  | ×    | `None`      | `"model.layers.4"`                                                                                                                                  |
 | `unmatch_size_layer_op` | レイヤーサイズが一致しない場合の挙動を指定します。                                                                                 | str                                              | ×    | `skip`      |  `skip`, `only_common_range`                                                                                                                            |
 | `force_merge_single`   |  `angle_merge`でvelocityが設定されていない時,１つのsub_modelのみとマージを行う際に、エラーを出すかどうか                                   | bool                                              | ×     | `False`     | `True`, `False`                                                                                                                                |
 | `v2s_empty_default`    | `angle_merge`でvelocityが設定されていない時、sub_modelsが空の場合に使用するデフォルト値                                         | str                                                | ×     |  `v1`      | `"v1"`, `"zero"`                                                                                                                     |
@@ -70,6 +70,7 @@ key2:
 | `div`                  | 除算 (`left` / `right`)                                                                 |
 | `mix`                  | 線形補間 (`left` * (1 - `velocity`) + `right` * `velocity`)                                |
 | `avg`                  | 平均 (`(left` + `right`) / 2)                                                           |
+| `passthrough`          | `left` をそのまま通す。`drop_layers` や `include_layers` / `exclude_layers` を単独で使いたい時向け |
 | `concat`               | 結合 (次元を増やす)                                                                   |
 | `maxpool`              | 最大値プーリング                                                                       |
 | `minpool`              | 最小値プーリング                                                                       |
@@ -223,7 +224,15 @@ models:
             source_key: "extra_layer.weight"
             target_key: "model.layers.10.extra_layer.weight"
 
-# 例5: 複数のマージ設定
+# 例5: passthrough で left をそのまま出力しつつ特定レイヤーを除外
+models:
+  - left: [model1.safetensors]
+    operation: passthrough
+    drop_layers:
+      - model.layers.24
+      - lm_head
+
+# 例6: 複数のマージ設定
 models:
   - name: merge1
     left: [model1.safetensors]
@@ -350,4 +359,3 @@ models:
         * `very_long_model_name_right_1.safetensors`:
            *   `insert_layers`:
                 *   `another_extra_layers_model.safetensors` から `another_extra_layer.0.weight` を挿入
-

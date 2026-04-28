@@ -6,7 +6,6 @@ from ..Calc.qeic_calc import calculate_correlation_matrices
 from ..Merger.base import Merger
 from ..Utils.layers import is_qeic_target_layer
 from ..Utils.operation_dicts import OPERATION_DICT
-from ..Utils.utility import prepare_tensor_slices
 
 
 class QeicMerger(Merger):
@@ -38,7 +37,8 @@ class QeicMerger(Merger):
         self._filter_layers()
 
         for target_k in self.target_state_dict.keys():
-            self.console.print(f"[blue]Processing layer: {target_k}[/blue]")
+            if not getattr(self.console, "is_live", False):
+                self.console.print(f"[blue]Processing layer: {target_k}[/blue]")
 
             # ベースとサブモデルに同じキーが存在するか詳細チェック
             base_keys = [target_k in b.state_dict() for b in self.base_models]
@@ -78,22 +78,14 @@ class QeicMerger(Merger):
                 self.excluded_layers.append(target_k)
                 continue
 
-            v_slice, base_slices, sub_slices, _ = prepare_tensor_slices(
-                self.target_state_dict,
-                target_k,
-                self.base_models,
-                self.sub_models,
-                self.unmatch_size_layer_op,
-                self.console,
-            )
-            self._log_operation_details(target_k)
+            layer_context = self._build_layer_context(target_k)
+            if layer_context is None:
+                continue
 
-            if self.velocity is None:
-                velocity = 1.0
-            elif isinstance(self.velocity, dict):
-                velocity = self.velocity.get(target_k, 1.0)
-            else:
-                velocity = self.velocity
+            v_slice = layer_context.target_slice
+            base_slices = layer_context.base_slices
+            sub_slices = layer_context.sub_slices
+            velocity = layer_context.velocity
 
             if not base_slices or not sub_slices:
                 self.console.print(
@@ -130,9 +122,10 @@ class QeicMerger(Merger):
             ):
                 continue
 
-            self.console.print(
-                f"  [magenta]Applying QEIC to layer: {target_k}[/magenta]"
-            )
+            if not getattr(self.console, "is_live", False):
+                self.console.print(
+                    f"  [magenta]Applying QEIC to layer: {target_k}[/magenta]"
+                )
 
             all_base_corr_matrices = []
             all_sub_corr_matrices = []
@@ -142,7 +135,7 @@ class QeicMerger(Merger):
                         base_model,
                         sub_model,
                         [target_k],
-                        self.model_dict.get("qeic_corr_method", "pearson"),
+                        self.request.get("qeic_corr_method", "pearson"),
                         v_slice.device,
                     )
                     all_base_corr_matrices.extend(base_corr_matrices)
@@ -156,11 +149,11 @@ class QeicMerger(Merger):
 
             kwargs = {
                 "layers": [target_k],
-                "corr_method": self.model_dict.get("qeic_corr_method", "pearson"),
-                "merge_method": self.model_dict.get("qeic_merge_method", "average"),
-                "alpha_mode": self.model_dict.get("qeic_alpha_mode", "correlation"),
-                "beta_mode": self.model_dict.get("qeic_beta_mode", "abs"),
-                "sub_threshold": self.model_dict.get("qeic_sub_threshold", -0.1),
+                "corr_method": self.request.get("qeic_corr_method", "pearson"),
+                "merge_method": self.request.get("qeic_merge_method", "average"),
+                "alpha_mode": self.request.get("qeic_alpha_mode", "correlation"),
+                "beta_mode": self.request.get("qeic_beta_mode", "abs"),
+                "sub_threshold": self.request.get("qeic_sub_threshold", -0.1),
                 "base_model": None,
                 "sub_model": None,
                 "device": v_slice.device,
@@ -184,5 +177,4 @@ class QeicMerger(Merger):
                 )
                 continue
 
-        self._print_summary()
-        return self.target
+        return self._finalize_merge()

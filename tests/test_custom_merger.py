@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 
 from modules.Merger.custom_merger import CustomMerger
+from tests.helpers import make_merge_context, make_merge_request
 
 
 class SimpleModel(nn.Module):
@@ -47,23 +48,17 @@ def test_custom_merger_widen(dummy_models):
     sub_models = [model_b]
 
     merger = CustomMerger(
-        skip_layernorm=False,
-        target_model=model_a, # Widen modifies the target model directly
-        base_models=base_models,
-        sub_models=sub_models,
-        velocity=0.5,
-        post_velocity=1.0,
-        skip_layers=[],
-        operation="widen",
-        post_operation="none",
-        preprocess="none",
-        post_preprocess="none",
-        normalization="none",
-        include_layers=None,
-        exclude_layers=None,
-        drop_layers=None,
-        unmatch_size_layer_op="skip",
-        model_dict={},
+        make_merge_context(
+            target_model=model_a,
+            base_models=base_models,
+            sub_models=sub_models,
+            velocity=0.5,
+            post_velocity=1.0,
+            request=make_merge_request(
+                operation="widen",
+                post_operation="none",
+            ),
+        )
     )
 
     # The merge() method for widen does not return a model, it modifies the target in-place

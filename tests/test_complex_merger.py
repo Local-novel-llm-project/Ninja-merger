@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 
 from modules.Merger.complex_merger import ComplexMerger
+from tests.helpers import make_merge_context, make_merge_request
 
 
 class SimpleModel(nn.Module):
@@ -48,23 +49,16 @@ def test_complex_merger_complexadd(dummy_models):
     sub_models = [model_b, model_c]
 
     merger = ComplexMerger(
-        skip_layernorm=False,
-        target_model=None,
-        base_models=base_models,
-        sub_models=sub_models,
-        velocity=0.5,
-        post_velocity=1.0,
-        skip_layers=[],
-        operation="complexadd",
-        post_operation="none",
-        preprocess="none",
-        post_preprocess="none",
-        normalization="none",
-        include_layers=None,
-        exclude_layers=None,
-        drop_layers=None,
-        unmatch_size_layer_op="skip",
-        model_dict={},
+        make_merge_context(
+            base_models=base_models,
+            sub_models=sub_models,
+            velocity=0.5,
+            post_velocity=1.0,
+            request=make_merge_request(
+                operation="complexadd",
+                post_operation="none",
+            ),
+        )
     )
 
     merged_model = merger.merge()
@@ -83,3 +77,38 @@ def test_complex_merger_complexadd(dummy_models):
             assert torch.allclose(
                 param.data, expected_param
             ), f"Parameter mismatch for layer: {name}"
+
+
+def test_complex_merger_angle_merge(dummy_models):
+    """
+    Tests that the 'angle_merge' operation accepts its keyword-only options and
+    produces the expected angle-weighted blend when sub-model directions match.
+    """
+    model_a, model_b, model_c = dummy_models
+
+    merger = ComplexMerger(
+        make_merge_context(
+            base_models=[model_a],
+            sub_models=[model_b, model_c],
+            velocity=0.5,
+            post_velocity=1.0,
+            request=make_merge_request(
+                operation="angle_merge",
+                post_operation="add",
+            ),
+        )
+    )
+
+    merged_model = merger.merge()
+
+    with torch.no_grad():
+        # NormAngleMerge first computes t from the pairwise cosine similarity of the
+        # sub-model directions, then PostAdd combines the angle-weighted base and
+        # average sub tensors as: v1 * (1 - t) + avg * t * velocity.
+        cosine_similarity = torch.tensor(1.0)
+        t = 2 * torch.cos(cosine_similarity) / (1.0 + torch.cos(cosine_similarity))
+        expected_value = (1.0 * (1.0 - t) + 2.5 * t * 0.5).item()
+
+        for _, param in merged_model.named_parameters():
+            expected_param = torch.full_like(param.data, expected_value)
+            assert torch.allclose(param.data, expected_param)

@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 
 from modules.Merger.qeic_merger import QeicMerger
+from tests.helpers import make_merge_context, make_merge_request
 
 
 class SimpleModel(nn.Module):
@@ -55,29 +56,21 @@ def test_qeic_merger_basic(mock_is_target, mock_calc_corr, dummy_models):
     sub_models = [model_b]
 
     merger = QeicMerger(
-        skip_layernorm=False,
-        target_model=None,
-        base_models=base_models,
-        sub_models=sub_models,
-        velocity=0.5,
-        post_velocity=1.0,
-        skip_layers=[],
-        operation="qeic_merge",
-        post_operation="none",
-        preprocess="none",
-        post_preprocess="none",
-        normalization="none",
-        include_layers=None,
-        exclude_layers=None,
-        drop_layers=None,
-        unmatch_size_layer_op="skip",
-        model_dict={
-            "qeic_corr_method": "pearson",
-            "qeic_merge_method": "average",
-            "qeic_alpha_mode": "correlation",
-            "qeic_beta_mode": "abs",
-            "qeic_sub_threshold": -0.1,
-        },
+        make_merge_context(
+            base_models=base_models,
+            sub_models=sub_models,
+            velocity=0.5,
+            post_velocity=1.0,
+            request=make_merge_request(
+                operation="qeic_merge",
+                post_operation="none",
+                qeic_corr_method="pearson",
+                qeic_merge_method="average",
+                qeic_alpha_mode="correlation",
+                qeic_beta_mode="abs",
+                qeic_sub_threshold=-0.1,
+            ),
+        )
     )
 
     # Mock the operation dict to avoid running the actual complex calculation

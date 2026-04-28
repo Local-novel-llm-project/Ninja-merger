@@ -15,40 +15,38 @@ class BasicMerger(Merger):
         self.console.rule("[bold blue]Starting Basic Model Merge Process[/bold blue]")
         self._filter_layers()
 
-        for k in self.target_state_dict.keys():
-            if k not in self.included_layers:
-                continue
-
-            if not self._check_layer_compatibility(k):
-                self.excluded_layers.append(k)
-                continue
-
-            v_slice, base_slices, sub_slices, _ = self._prepare_tensor_slices(k)
-            self._log_operation_details(k)
+        for layer_context in self._iter_merge_layer_contexts():
+            k = layer_context.key
+            v_slice = layer_context.target_slice
+            base_slices = layer_context.base_slices
+            sub_slices = layer_context.sub_slices
             try:
                 base_processed_values = []
-                post_velocity = (
-                    self.post_velocity.get(k, 1.0)
-                    if isinstance(self.post_velocity, dict)
-                    else self.post_velocity
-                )
+                post_velocity = layer_context.post_velocity
+                velocity = layer_context.velocity
 
-                if self.velocity is None:
-                    velocity = 1.0
-                elif isinstance(self.velocity, dict):
-                    velocity = self.velocity.get(k, 1.0)
-                else:
-                    velocity = self.velocity
-
-                for b_slice in base_slices:
-                    for s_slice in sub_slices:
-                        processed = OPERATION_DICT[self.operation](
-                            v_slice,
-                            b_slice,
-                            s_slice,
-                            velocity,
+                if self.operation in {"passthrough", "none"}:
+                    if len(base_slices) != 1:
+                        raise ValueError(
+                            f"{self.operation} operation requires exactly one base model"
                         )
-                        base_processed_values.append(processed)
+                    processed = OPERATION_DICT[self.operation](
+                        v_slice,
+                        base_slices[0],
+                        None,
+                        velocity,
+                    )
+                    base_processed_values.append(processed)
+                else:
+                    for b_slice in base_slices:
+                        for s_slice in sub_slices:
+                            processed = OPERATION_DICT[self.operation](
+                                v_slice,
+                                b_slice,
+                                s_slice,
+                                velocity,
+                            )
+                            base_processed_values.append(processed)
 
                 if not base_processed_values:
                     self.console.print(
@@ -90,9 +88,10 @@ class BasicMerger(Merger):
                 )
                 raise
 
-        self._print_summary()
+        return self._finalize_merge()
+
+    def _post_merge_finalize(self):
         if isinstance(self.target, DummyModel):
             all_models = self.base_models + self.sub_models
             configs = [m.config for m in all_models if hasattr(m, "config")]
             self.target._config = DummyConfig(configs=configs)
-        return self.target

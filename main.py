@@ -6,443 +6,165 @@
 # license: Apache-2.0
 
 import argparse
-import gc
-import os
-import sys
+from typing import Sequence
 
-import torch
-from rich.console import Console
-from transformers import AutoTokenizer
-
-from modules.Merger.factory import MergerFactory
-from modules.Utils.layers import dump_layers, get_skip_layers, parse_layers
-from modules.Utils.loaders import (
-    load_config,
-    load_model,
-    load_tokenizer,
+from modules.Services.merge_runner import (
+    MergeExecutionError,
+    MergeRunnerOptions,
+    run_merge,
 )
-from modules.Utils.models import (
-    load_and_prepare_models,
-    prepare_model_metadata,
-)
-from modules.Utils.models import DummyModel
-from modules.Utils.utility import define_savename, scale_tensor_inplace
 
-console = Console()
+TORCH_DTYPE_CHOICES = ("float16", "bfloat16", "float32", "float64")
 
 
-def main(args):
-    skip_layernorm = args.skip_layernorm
-    merge_models_device = args.merge_models_device
-    target_model_device = args.target_model_device
-    torch_dtype = getattr(torch, args.torch_dtype)
-    include_layers = parse_layers(args.include_layers)
-    exclude_layers = parse_layers(args.exclude_layers)
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Merge model checkpoints from a YAML config.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        epilog=(
+            "Example:\n"
+            "  python main.py -c g4novel_vector.yaml --merge-models-device cuda:0"
+        ),
+    )
 
-    models_list, use_scaling = load_config(args.config)
-    target_model = None
-    # is_llava_next = False # prepare_model_metadata で取得
+    input_group = parser.add_argument_group("Input / Output")
+    execution_group = parser.add_argument_group("Execution")
+    filter_group = parser.add_argument_group("Layer Filters")
+    debug_group = parser.add_argument_group("Diagnostics")
 
-    for i, model_dict in enumerate(models_list):
-        console.rule(
-            f"[bold blue]Processing Merge Configuration {i + 1}/{len(models_list)}[/bold blue]"
-        )
-
-        # 1. メタデータの準備
-        metadata = prepare_model_metadata(model_dict)
-        current_use_scaling = (
-            metadata["use_scaling"]
-            if metadata["use_scaling"] is not None
-            else use_scaling
-        )
-        effective_include_layers = (
-            include_layers if include_layers is not None else metadata["include_layers"]
-        )
-        effective_exclude_layers = (
-            exclude_layers if exclude_layers is not None else metadata["exclude_layers"]
-        )
-
-        # Normalize list targets like ["recurrent"] to a scalar for control flow
-        target_value_scalar = metadata["target_value_scalar"]
-
-        if target_value_scalar == "recurrent":
-            if target_model is None:
-                console.print(
-                    "[red]Error: 'recurrent' target specified, but no previous merge has been performed.[/red]"
-                )
-                sys.exit(1)
-            console.print("  Using 'recurrent' target (result of previous merge).")
-
-        elif target_value_scalar is None or target_value_scalar == "null":
-            target_model = None
-            console.print("  Using 'null' target (creating a new model).")
-
-        else:
-            try:
-                console.print(f"  Loading target model: {target_value_scalar}")
-                target_model = load_model(target_value_scalar, target_model_device, torch_dtype)
-                # if target_value.lower() in ["llava", "vlm", "llava-next"]:
-                #     is_llava_next = True
-            except Exception as e:
-                console.print(
-                    f"[red]Error loading target model '{target_value_scalar}': {e}[/red]"
-                )
-                sys.exit(1)
-
-        savename = define_savename(
-            metadata["base_model_names"],
-            metadata["sub_model_names"],
-            metadata["target_value"],
-            args.out_dir,
-            i,
-            model_dict,
-        )
-        console.print(f"  Saving to: [cyan]{savename}[/cyan]")
-
-        # try:
-        #     base_models, sub_models, velocity, post_velocity = prepare_models_for_merging( # 削除
-        #         model_dict, merge_models_device, torch_dtype # 削除
-        #     ) # 削除
-
-        #     console.print(
-        #         f"Base models: {[model.config.name_or_path for model in base_models]}"
-        #     )
-        #     if base_models:
-        #         console.print(
-        #             f"Base models[0] config: {base_models[0].config}"
-        #         )  # 最初の base_model の config を表示
-        #         console.print(
-        #             f"Base models[0] first layer keys: {list(base_models[0].state_dict().keys())[:5]}"
-        #         )  # 最初の数レイヤーのキーを表示
-
-        #     console.print(f"Sub models: {sub_models}")  # sub_models の内容を表示
-        #     if sub_models:
-        #         console.print(
-        #             f"Sub models[0] config: {sub_models[0].config}"
-        #         )  # 最初の sub_model の config を表示
-        #         console.print(
-        #             f"Sub models[0] first layer keys: {list(sub_models[0].state_dict().keys())[:5]}"
-        #         )  # 最初の数レイヤーのキーを表示
-
-        #     console.print(
-        #         f"  Base models: {[model.config.name_or_path for model in base_models]}"
-        #     )
-        #     console.print(
-        #         f"  Sub models: {[model.config.name_or_path for model in sub_models]}"
-        #     )
-        # except Exception as e:
-        #     console.print(f"[red]Error loading base/sub models: {e}[/red]")
-        #     continue
-
-        if args.dump_layers:
-            if target_model is None:
-                # base_models, sub_models, _, _ = load_and_prepare_models(model_dict, merge_models_device, torch_dtype) # コメントアウト
-                console.print(
-                    "[yellow]Warning: Target model is None. Dumping layers from the first base model.[/yellow]"
-                )
-                try:
-                    # dump_layers(base_models[0].state_dict(), savename) # コメントアウト
-                    # モデルをロードする
-                    base_models, _, _, _ = load_and_prepare_models(
-                        model_dict, merge_models_device, torch_dtype
-                    )
-                    dump_layers(base_models[0].state_dict(), savename)
-                except Exception as e:
-                    console.print(f"[red]Error dumping layers: {e}[/red]")
-            else:
-                try:
-                    dump_layers(target_model.state_dict(), savename)
-                except Exception as e:
-                    console.print(f"[red]Error dumping layers: {e}[/red]")
-            continue
-
-        if os.path.exists(savename) and not args.dry_run:
-            console.print(f"  [yellow]Skipping: {savename} (already exists)[/yellow]")
-            continue
-
-        # try:
-        #     # unmatch_size_layer_op を取得
-        #     unmatch_size_layer_op = model_dict.get("unmatch_size_layer_op", "skip")
-        #     console.print(f"  Unmatch size layer operation: {unmatch_size_layer_op}")
-
-        #     # load_left_right_models に unmatch_size_layer_op を渡す
-        #     base_models, sub_models, velocity = prepare_models_for_merging(
-        #         model_dict, merge_models_device, torch_dtype
-        #     )
-
-        # except Exception as e:
-        #     console.print(f"[red]Error loading base/sub models: {e}[/red]")
-        #     # 語彙サイズの不一致エラーの場合、ヒントを表示
-        #     if "The size of tensor a" in str(
-        #         e
-        #     ) and "must match the size of tensor b" in str(e):
-        #         console.print(
-        #             "[yellow]This error may be related to vocabulary size mismatch.[/yellow]"
-        #         )
-        #         console.print("[yellow]Try using the following options:[/yellow]")
-        #         console.print(
-        #             "1. Set unmatch_size_layer_op: 'only_common_range' in your config"
-        #         )
-        #         console.print(
-        #             "2. Or use --exclude_layers 'embed_tokens,lm_head' to exclude embedding layers"
-        #         )
-
-        #     continue
-
-        # console.print("\n ------------------------------------") # コメントアウト
-
-        # 2. モデルのロードと準備
-        try:
-            base_models, sub_models, velocity, post_velocity = load_and_prepare_models(
-                model_dict, merge_models_device, torch_dtype, target_model
-            )
-        except Exception as e:
-            console.print(f"[red]Error loading base/sub models: {e}[/red]")
-            # 語彙サイズの不一致エラーの場合、ヒントを表示
-            if "The size of tensor a" in str(
-                e
-            ) and "must match the size of tensor b" in str(e):
-                console.print(
-                    "[yellow]This error may be related to vocabulary size mismatch.[/yellow]"
-                )
-                console.print("[yellow]Try using the following options:[/yellow]")
-                console.print(
-                    "1. Set unmatch_size_layer_op: 'only_common_range' in your config"
-                )
-                console.print(
-                    "2. Or use --exclude_layers 'embed_tokens,lm_head' to exclude embedding layers"
-                )
-            continue
-
-        # include_layers = model_dict.get("include_layers", None) # metadata に移動
-        # exclude_layers = model_dict.get("exclude_layers", None) # metadata に移動
-        # drop_layers = model_dict.get("drop_layers", None) # metadata に移動
-        # operation = model_dict.get("operation", "sub") # metadata に移動
-        # post_operation = model_dict.get("post_operation", "add") # metadata に移動
-        # preprocess = model_dict.get("preprocess", "none") # metadata に移動
-        # post_preprocess = model_dict.get("post_preprocess", "none") # metadata に移動
-        # post_velocity = model_dict.get("post_velocity", 1.0) # metadata と load_and_prepare_models
-        # normalization = model_dict.get("normalization", "none") # metadata に移動
-        # unmatch_size_layer_op = model_dict.get("unmatch_size_layer_op", "skip") # metadataに移動
-        # force_merge_single = model_dict.get("force_merge_single", False) # metadataに移動
-        # v2s_empty_default = model_dict.get("v2s_empty_default", "v1") # metadataに移動
-        # v2s_single_default = model_dict.get("v2s_single_default", "auto") # metadataに移動
-        # use_scaling = model_dict.get("use_scaling", True) # metadataに移動
-
-        # 3. skip_layers の取得
-        try:
-            skip_layers = get_skip_layers(
-                target_model,
-                base_models,
-                sub_models,
-                metadata["unmatch_size_layer_op"],
-                is_llava_next=metadata["is_llava_next"],
-            )
-        except Exception as e:
-            console.print(f"[red]Error getting skip layers: {e}[/red]")
-            continue
-
-        console.print("  [green]Starting merge...[/green]")
-        console.print(f"  Operation: {metadata['operation']}")
-        console.print(f"  Velocity: {velocity}")
-
-        if target_model is None:
-            console.print("  Post-operation: N/A (target is None)")
-        else:
-            console.print(f"  Post-operation: {metadata['post_operation']}")
-
-        try:
-            # MergerFactory を使用して Merger インスタンスを作成
-            merger_factory = MergerFactory()
-            merger = merger_factory.create_merger(
-                metadata["operation"],
-                skip_layernorm,
-                target_model,
-                base_models,
-                sub_models,
-                velocity,
-                post_velocity,  # post_velocity は load_and_prepare_models から返される
-                skip_layers,
-                metadata["post_operation"],
-                metadata["preprocess"],
-                metadata["post_preprocess"],
-                metadata["normalization"],
-                effective_include_layers,
-                effective_exclude_layers,
-                metadata["drop_layers"],
-                metadata["unmatch_size_layer_op"],
-                is_llava_next=metadata["is_llava_next"],
-                force_merge_single=metadata["force_merge_single"],
-                v2s_empty_default=metadata["v2s_empty_default"],
-                v2s_single_default=metadata["v2s_single_default"],
-                model_dict=model_dict,  # model_dict も渡すことを忘れない
-            )
-            # 作成した Merger インスタンスの merge メソッドを呼び出す
-            target_model = merger.merge()
-
-        except Exception as e:
-            console.print(f"[red]Error during merge: {e}[/red]")
-            continue
-
-        if args.dry_run:
-            console.print("  [yellow]Dry run: No models saved.[/yellow]")
-            continue
-
-        console.print(" === ")
-        console.print("  [green]Saving model...[/green]")
-
-        try:
-            try:
-                if target_value_scalar == "recurrent":
-                    console.print("    Saving tokenizer from previous target model...")
-                    try:
-                        tokenizer = AutoTokenizer.from_pretrained(
-                            target_model.config.name_or_path, trust_remote_code=True
-                        )
-                        tokenizer.save_pretrained(savename)
-                        console.print("    [green]Tokenizer saved.[/green]")
-                    except Exception as e:
-                        console.print(
-                            f"[yellow]Warning: Could not save tokenizer for recurrent target: {e}[/yellow]"
-                        )
-
-                elif target_value_scalar is None or target_value_scalar == "null":
-                    console.print(
-                        f"    Saving tokenizer from {metadata['base_model_names'][0]}..."
-                    )
-                    tokenizer = load_tokenizer(metadata["base_model_names"][0])
-                    tokenizer.save_pretrained(savename)
-                    console.print("    [green]Tokenizer saved.[/green]")
-                else:
-                    console.print(f"    Saving tokenizer from {target_value_scalar}...")
-                    tokenizer = load_tokenizer(target_value_scalar)
-                    tokenizer.save_pretrained(savename)
-                    console.print("    [green]Tokenizer saved.[/green]")
-            except Exception as e:
-                console.print(f"[yellow]Warning: Failed to save tokenizer: {e}[/yellow]")
-
-            if current_use_scaling:
-                console.print(
-                    "    Checking for small values in the merged model and scaling if necessary..."
-                )
-                threshold = 1e-7
-                scale_factor = 10000.0
-                if target_model is None:
-                    state_dict = base_models[
-                        0
-                    ].state_dict()  # targetがないので、Leftから取得
-                else:
-                    state_dict = target_model.state_dict()
-
-                for key, value in state_dict.items():
-                    if not isinstance(value, torch.Tensor) or not value.is_floating_point():
-                        continue
-                    if torch.any((torch.abs(value) < threshold) & (value != 0)):
-                        console.print(
-                            f"      Warning: Tensor '{key}' contains values smaller than {threshold}. Scaling..."
-                        )
-                        scaled = scale_tensor_inplace(
-                            value.detach().clone().float(), threshold, scale_factor
-                        ).to(device=value.device, dtype=value.dtype)
-                        value.copy_(scaled)
-
-            if target_model is None:
-                base_models[0].save_pretrained(savename)
-            elif isinstance(target_model, DummyModel):
-                console.print(f"    Saving model and config as a .pth file to {savename}.pth")
-                save_data = {
-                    "config": target_model.config.to_dict(),
-                    "model": target_model.state_dict(),
-                }
-                torch.save(save_data, f"{savename}.pth")
-            else:
-                target_model.save_pretrained(savename)
-            console.print("    [green]Model saved.[/green]")
-
-        except Exception as e:
-            console.print(f"[red]Error saving model/tokenizer: {e}[/red]")
-            continue
-
-        del base_models
-        gc.collect()
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Merge models")
-    parser.add_argument(
+    input_group.add_argument(
         "-c",
         "--config",
         type=str,
         default="model_config.yaml",
-        help="Path to the JSON configuration file",
+        help="Path to the YAML merge configuration file",
     )
-    parser.add_argument(
+    input_group.add_argument(
         "-o",
+        "--out-dir",
         "--out_dir",
+        dest="out_dir",
         type=str,
         default="./merged_models",
-        help="Directory to save the merged model",
+        help="Directory for merged model outputs",
     )
-    parser.add_argument(
+    execution_group.add_argument(
         "-n",
+        "--skip-layernorm",
         "--skip_layernorm",
+        dest="skip_layernorm",
         action="store_true",
-        help="Skip layernorm during merging",
+        help="Skip LayerNorm-like layers during merging",
     )
-    parser.add_argument(
+    execution_group.add_argument(
         "-dm",
+        "--merge-models-device",
         "--merge_models_device",
+        dest="merge_models_device",
         type=str,
         default="cpu",
-        help="Device for merging models",
+        help="Device used to load base/sub models",
     )
-    parser.add_argument(
+    execution_group.add_argument(
         "-dt",
+        "--target-model-device",
         "--target_model_device",
+        dest="target_model_device",
         type=str,
         default="cpu",
-        help="Device for the target model",
+        help="Device used to load explicit target models",
     )
-    parser.add_argument(
-        "-t", "--torch_dtype", type=str, default="bfloat16", help="Torch data type"
+    execution_group.add_argument(
+        "-t",
+        "--torch-dtype",
+        "--torch_dtype",
+        dest="torch_dtype",
+        type=str,
+        choices=TORCH_DTYPE_CHOICES,
+        default="bfloat16",
+        help="Torch dtype used when loading transformer models",
     )
-    parser.add_argument(
+    execution_group.add_argument(
         "-r",
+        "--recurrent-mode",
         "--recurrent_mode",
-        type=bool,
+        dest="recurrent_mode",
+        action=argparse.BooleanOptionalAction,
         default=True,
-        help="use target recurrent mode",
+        help="Allow later config entries to reference previous merge results via 'recurrent'",
     )
-    parser.add_argument(
+    execution_group.add_argument(
         "-d",
+        "--dry-run",
         "--dry_run",
+        dest="dry_run",
         action="store_true",
-        help="Dump processed layer infos without merging",
+        help="Run the merge pipeline without writing output artifacts",
     )
-    parser.add_argument(
+    execution_group.add_argument(
         "-l",
+        "--save-only-last-model",
         "--save_only_last_model",
+        dest="save_only_last_model",
         action="store_true",
-        help="Only last model saved",
+        help="Keep intermediate merge results in memory and save only the final step",
     )
-    parser.add_argument(
+    debug_group.add_argument(
+        "--dump-layers",
         "--dump_layers",
+        dest="dump_layers",
         action="store_true",
-        help="Dump model layers to a file instead of merging",
+        help="Write layer names for the selected target/base model instead of merging",
     )
-    parser.add_argument(
+    filter_group.add_argument(
+        "--include-layers",
         "--include_layers",
+        dest="include_layers",
         type=str,
         default=None,
-        help="Comma-separated list of layers to include",
+        help="Comma-separated layer filters to include",
     )
-    parser.add_argument(
+    filter_group.add_argument(
+        "--exclude-layers",
         "--exclude_layers",
+        dest="exclude_layers",
         type=str,
         default=None,
-        help="Comma-separated list of layers to exclude",
+        help="Comma-separated layer filters to exclude",
+    )
+    return parser
+
+
+def parse_args(argv: Sequence[str] | None = None) -> MergeRunnerOptions:
+    parser = build_parser()
+    namespace = parser.parse_args(argv)
+
+    if namespace.dump_layers and namespace.dry_run:
+        parser.error("--dump-layers already avoids saving merged artifacts, so it cannot be combined with --dry-run")
+
+    return MergeRunnerOptions(
+        config=namespace.config,
+        out_dir=namespace.out_dir,
+        skip_layernorm=namespace.skip_layernorm,
+        merge_models_device=namespace.merge_models_device,
+        target_model_device=namespace.target_model_device,
+        torch_dtype=namespace.torch_dtype,
+        recurrent_mode=namespace.recurrent_mode,
+        dry_run=namespace.dry_run,
+        save_only_last_model=namespace.save_only_last_model,
+        dump_layers=namespace.dump_layers,
+        include_layers=namespace.include_layers,
+        exclude_layers=namespace.exclude_layers,
     )
 
-    args = parser.parse_args()
 
-    main(args)
+def main(options: MergeRunnerOptions | None = None) -> None:
+    runner_options = options or parse_args()
+    try:
+        run_merge(runner_options)
+    except MergeExecutionError as error:
+        raise SystemExit(1) from error
+
+
+if __name__ == "__main__":
+    main()
